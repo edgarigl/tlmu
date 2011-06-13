@@ -1,0 +1,681 @@
+\input texinfo @c -*- texinfo -*-
+@c %**start of header
+@setfilename tlmu-doc.info
+
+@documentlanguage en
+@documentencoding UTF-8
+
+@settitle Transaction Level eMulator (TLMu)
+@exampleindent 0
+@paragraphindent 0
+@c %**end of header
+
+@ifinfo
+@direntry
+* TLMu: (tlmu-doc).    The TLMu Documentation.
+@end direntry
+@end ifinfo
+
+@iftex
+@titlepage
+@sp 7
+@center @titlefont{TLMu}
+@sp 1
+@center @titlefont{Documentation}
+@sp 3
+@end titlepage
+@end iftex
+
+@ifnottex
+@node Top
+@top
+
+@menu
+* Introduction::
+* Supported Archs::
+* Installation::
+* Internals::
+@end menu
+@end ifnottex
+
+@contents
+
+@node Introduction
+@chapter Introduction
+TLMu extends the QEMU emulation framework making it possible to use QEMU
+systems:
+
+@itemize
+@item
+In a System-C TLM-2.0 environment.
+@item
+In a heterogeneous arch environment, e.g a MIPS and a CRIS core on
+the same virtual system and within the same emulator process.
+@item
+In a system where RAM's are external to QEMU
+@end itemize
+
+TLMu can provide either only the CPU cores or it can provide a more complete
+partial system (e.g, CPU core + internal devices). The CPU core or the partial
+system can then be integrated with a system written in for example TLM-2.0.
+
+There is good flexibility in how systems can be partitioned. TLMu can use
+RAM both internal to the TLMu instance and also external (provided by the
+main emulation system). Different TLMu instances within an emulator can cross
+access each others RAMs and devices (with some constrains).
+
+TLMu can provide per core execution traces and GDB remote access for
+easy guest software debugging.
+
+@node Supported Archs
+@chapter Supported Archs
+
+At the moment, the following archs have basic support for TLMu:
+@itemize
+@item
+CRIS
+@item
+ARM
+@item
+MIPS
+@end itemize
+
+I'd expect most (if not all) archs to work with little integration, but
+I haven't tested them. Also, one needs to decide howto connect the interrupt
+signals from the external emulator into the TLMu CPU core and write the
+glue logic.
+
+@node Installation
+@chapter Installation
+
+@section Getting the sources
+If you are reading this, you probably already cloned the git tree.
+
+Clone the git tree, for example:
+@example
+% git clone @code{git://github.com/edgarigl/tlmu.git}
+@end example
+
+@section Configuring
+Create a build directory (or build it in the src dir) and enter it:
+@example
+% mkdir build-tlmu
+% cd build-tlmu
+@end example
+
+To get a list of supported configuration flags, add --help to the argument
+list. These are essentially the same as the ones for plain QEMU.
+
+Configure TLMu:
+@example
+% ../tlmu/configure --extra-cflags=-fPIC
+@end example
+
+If you want to install debug versions of TLMu, add --disable-strip to
+configure, e.g:
+@example
+% ../tlmu/configure --extra-cflags=-fPIC --disable-strip
+@end example
+
+If you want to save time, and only build for a subset of the archs (e.g CRIS, ARM and MIPS):
+@example
+% ../tlmu/configure --target-list=cris-softmmu,mipsel-softmmu,arm-softmmu --extra-cflags=-fPIC
+@end example
+
+
+@section Building
+Build tlmu:
+@example
+% make && make tlmu
+@end example
+
+Install tlmu:
+@example
+% make install-tlmu DESTDIR=/tmp/my-tlmu/
+@end example
+
+Now you should have a TLMu lib per arch, for example:
+@example
+% ls /tmp/my-tlmu/lib/
+libtlmu-arm.so  libtlmu-cris.so  libtlmu-mipsel.so
+@end example
+
+And also the header files needed to interface with TLMu:
+@example
+% ls /tmp/my-tlmu/include/tlmu/
+tlmu.h  tlmu-qemuif.h
+@end example
+
+@section Running the examples
+
+An easy way to get started is by taking a look at the examples
+distributed with TLMu. Look at tests/tlmu/*
+
+There is a simple example in pure C and another one that shows integration
+with System-C TLM-2.0 (C++).
+
+The examples instantiate 3 cores: a CRISv10, an ARM926 and a MIPS 24Kc.
+Three guest images are provided, <arch>-guest/guest. The guests all
+interact with a magic device that allows them to print:
+@example
+Hello, I am the <arch>
+@end example
+and then exit.
+
+Enter the test directory:
+@example
+% cd build-tlmu/tests/tlmu
+@end example
+
+Now install a local copy of the tlmu sdk:
+@example
+% make install-tlmu
+@end example
+
+Build the C example:
+@example
+% make c_example
+@end example
+
+Run the C example
+@example
+% LD_LIBRARY_PATH=./lib ./c_example
+Hello, I am the CRIS
+CRIS: STOP: 0
+Hello, I am the MIPSEL
+MIPS: STOP: 0
+Hello, I am the ARM
+ARM: STOP: 0
+@end example
+
+Before trying the System-C example, you will need to edit
+tests/tlmu/sc_example/Makefile. Set the paths to where your
+System-C and TLM-2.0 installation is located.
+
+For example:
+@example
+SYSTEMC = /opt/systemc
+TLM2 = /opt/systemc/TLM-2009-07-15
+@end example
+
+After editing the Makefile, build the System-C example:
+@example
+% make sc_example
+@end example
+
+Run the System-C example
+@example
+% LD_LIBRARY_PATH=./lib ./sc_example/sc_example
+
+             SystemC 2.2.0 --- Apr  1 2011 17:09:54
+        Copyright (c) 1996-2006 by all Contributors
+                    ALL RIGHTS RESERVED
+HHHeeellllllooo,,,   III   aaammm   ttthhheee   MACIRRPMIS
+SESTOP:  0 22030 ns
+@end example
+
+As a short-cut, you can build both examples by doing:
+@example
+% make sc-all
+@end example
+And run both examples by doing:
+@example
+% make run-sc-all
+@end example
+
+
+@node Internals
+@chapter Internals
+
+@section Overview
+
+TLMu consists of a set of libraries with corresponding C header files. The
+CPU emulators built as shared libraries, one library per supported
+architecture (e.g libtlmu-arm.so). To load and use these shared emulator
+libraries, one can use the C-API provided by the libtlmu.a library. libtlmu
+provides a C interface to load, run, interact with (e.g make bus accesses,
+raise interrupts, etc) and finally quit each emulator.
+
+@itemize
+@item
+include/tlmu/tlmh.h		- Main TLMu API (used by emulators, e.g you)
+@item
+include/tlmu/tlmh-qemuif.h	- ABI between TLMu and QEMU (used between libtlmu and the CPU emulators)
+@item
+lib/libtlmu.a			- TLMu C API
+@item
+lib/libtlmu-arm.so		- TLMu ARM emulator
+@item
+lib/libtlmu-cris.so		- TLMu CRIS emulator
+@item
+lib/libtlmu-mipsel.so		- TLMu MIPS (little-endian) emulator
+@item
+etc
+@end itemize
+
+@section C-API
+@subsection Creating a TLMu instance
+
+Before performing any TLMu operations, you need to get hold of a TLMu instance.
+This can be done by simply creating one and initializing it with tlmu_init().
+
+@example{
+/*
+ * Initialize a TLMu instance. Takes an instance name as argument.
+ */
+void tlmu_init(struct tlmu *t, const char *name);
+@end example
+
+Example:
+@example
+@{
+    /* Create an instance.  */
+    struct tlmu t;
+    /* and initialize it.  */
+    tlmu_init(&ti, "myTLMu");
+@}
+@end example
+
+@subsection Loading a TLMu emulator
+
+Loading of an emulator is done by calling tlmu_load. The arguments are
+a pointer to a TLMu instance and the name of the emulator library
+(e.g libtlmu-cris.so).
+
+@example
+/*
+ * Load an emulator library.
+ *
+ * Returns zero on success and non-zero if failing to load the
+ * emulator.
+ */
+int tlmu_load(struct tlmu *t, const char *soname);
+@end example
+
+Example:
+
+@example
+@{
+    int err;
+
+    err = tlmu_load(&t, "libtlmu-arm.so");
+    if (err) @{
+        fprintf(stderr, "Failed!!!!\n");
+    @}
+@}
+@end example
+
+@subsection Setting up the emulator
+
+Setting up the emulator involves configuration of the QEMU arguments,
+setting various TLMu parameters and registering callbacks for the various
+events.
+
+@subsection TLMu/QEMU argument list
+The QEMU argument list is created by series of calls to tlmu_append_arg.
+The various options are documented in XXXXXXX.
+
+@example
+/*
+ * Append an argument to the TLMu instances argv list.
+ */
+void tlmu_append_arg(struct tlmu *t, const char *arg);
+@end example
+
+Example:
+@example
+/* Choose a particular ARM model.  */
+tlmu_append_arg(t, "-cpu");
+tlmu_append_arg(t, "arm926");
+
+/* Pre-load an elf image.  */
+tlmu_append_arg(t, "-kernel");
+tlmu_append_arg(t, "program.elf");
+
+/* Enable tracing.  */
+tlmu_append_arg(t, "-d");
+tlmu_append_arg(t, "in_asm,exec,cpu");
+@end example
+
+@subsection Setting the log filename
+When using enabling execution traces, it is useful to setup a per instance
+logfile to avoid having the different TLMu cores stepping on each other.
+@example
+/*
+ * Set the per TLMu instance log filename.
+ *
+ * t         - The TLMu instance
+ * f         - Log filename
+ */
+void tlmu_set_log_filename(struct tlmu *t, const char *f);
+@end example
+
+@subsection Map RAM areas
+Internally, TLMu differentiates pretty heavily between RAMs and other devices.
+TLMu needs to know if any of the external mappings provided by the main
+emulator are RAM devices.
+
+At setup time, you'll need to tell TLMu by calling tlmu_map_ram():
+@example
+/*
+ * Tell the TLMu instance that a given memory area is maps to RAM.
+ *
+ * t         - The TLMu instance
+ * name      - An name for the RAM
+ * addr      - Base address
+ * size      - Size of RAM
+ * rw        - Zero if ROM, one if writes are allowed.
+ */
+void tlmu_map_ram(struct tlmu *t, const char *name,
+                uint64_t addr, uint64_t size, int rw);
+@end example
+
+Example:
+@example
+tlmu_map_ram(t, "rom", 0x18000000ULL, 128 * 1024, 0);
+@end example
+
+@anchor{cb_registration}
+@subsection Registering callbacks
+TLMu emulators will occasionally call back into your emulator to get certain
+things done. For example, when making bus accesses that map to external
+devices or memory provided by your emulator.
+
+For TLMu emulators to know what functions to call, you need to register them.
+Similarly, for you (in the case you have multiple TLMu instances) to know which
+instance the call back belongs to, you need to register a pointer to whatever
+structure you'd like to be passed at every call back from TLMu.
+
+@example
+/*
+ * Register a callback function to be called when TLMu emulators need to
+ * make bus accesses back into the main emulator.
+ *
+ * In the callback:
+ *  o          - Is the registered instance pointer, see tlm_set_opaque().
+ *  clk        - The current TLMu time. (-1 if invalid/unknown).
+ *  rw         - 0 for reads, non-zero for write accesses.
+ *  data       - Pointer to data
+ *  len        - Requested transaction length
+ *
+ * The callback is expected to return 1 if the accessed unit supports DMI,
+ * see tlmu_get_dmi_ptr for more info.
+ */
+void tlmu_set_bus_access_cb(struct tlmu *t,
+                int (*access)(void *o, int64_t clk,
+                                int rw, uint64_t addr, void *data, int len));
+/*
+ * Register a callback for debug accesses. The callback works similarly as
+ * the one for tlmu_set_bus_access_cb, but it doesn't have a return value.
+ *
+ * Debug accesses will be made by various debug units, for example the GDB
+ * stub or the tracing units when disassembling guest code.
+ */
+void tlmu_set_bus_access_dbg_cb(struct tlmu *t,
+                void (*access)(void *, int64_t, int, uint64_t, void *, int));
+/*
+ * Register a callback to be called when the TLMu emulator requests a
+ * Direct Memory Interface (DMI) area.
+ */
+void tlmu_set_bus_get_dmi_ptr_cb(struct tlmu *t,
+                        void (*dmi)(void *, uint64_t, struct tlmu_dmi*));
+/*
+ * Register a callback function to be called at sync points.
+ */
+void tlmu_set_sync_cb(struct tlmu *t, void (*cb)(void *, int64_t));
+@end example
+
+Example:
+@example
+    /* Register our callbacks.  */
+    tlmu_set_bus_access_cb(t, tlm_bus_access);
+    tlmu_set_bus_access_dbg_cb(t, tlm_bus_access_dbg);
+    tlmu_set_bus_get_dmi_ptr_cb(t, tlm_get_dmi_ptr);
+    tlmu_set_sync_cb(t, tlm_sync);
+@end example
+
+@subsection Running
+
+Calling tlmu_run will start the TLMu emulator: 
+@example
+    /* Run.  */
+    tlmu_run(t);
+@end example
+
+It is also possible to start the CPU emulator in sleep mode:
+@example
+    tlmu_set_boot_state(t, TLMU_BOOT_SLEEPING);
+    tlmu_run(t);
+
+@end example
+
+And later, you can wake it up:
+@example
+    tlmu_notify_event(t, TLMU_TLM_EVENT_WAKE, NULL);
+@end example
+
+@anchor{timing}
+@subsection Timing
+
+The recomended way to run TLMu is by using QEMU's icount feature. Specifically
+by passing "-icount 1" at setup time.
+
+@example
+tlmu_append_arg(t, "-icount");
+tlmu_append_arg(t, "1");
+@end example
+
+TLMu will synchronize at various sync points. These points are:
+@itemize
+@item
+When the TLMu CPU makes I/O accesses into the main emulator
+@item
+When the TLMu CPU makes non-DMI memory accesses into the main emulator
+@item
+When the TLMu CPU gets interrupted
+@end itemize
+
+When TLMu synchronizes it will pass a clock value representing the amount of
+time passed as seen from within TLMu. When running with -icount 1, the time
+will be passed in nano seconds driven by an instruction counter that accounts
+2ns per instruction. The main emulator can then transform the TLMu specific
+time into a global time based on the actual speed of the particular TLMu
+instance.
+
+In some cases, TLMu will hit a sync point but without beeing able to
+synchronize. In these cases TLMu will pass -1 as the clk. The main emulator
+should treat -1 as a special case, and ignore the synchronization.
+
+@subsection Bus accesses from TLMu
+When TLMu cores need to make bus accesses into the main emulator, they do so
+by calling the bus_access callback or the bus_access_dbg callback. These
+callbacks can be registered per TLMu instance, see @ref{cb_registration} for
+more info on howto register them.
+
+The callback looks like this:
+@example
+int my_bus_access(void *o, int64_t clk, int rw,
+                        uint64_t addr, void *data, int len)
+@end example
+
+See @ref{cb_registration}. for more info on what the arguments
+and return value mean.
+
+@subsection Bus accesses into TLMu
+The main emulator can also make bus accesses onto the TLMu system.
+These access are done by calling the tlmu_bus_access() function call.
+
+@example
+tlmu_bus_access(t, rw, addr, data, len);
+@end example
+
+@anchor{interrupts}
+@subsection Interrupts
+Interrupts are implemented in a machine dependant way. Depending on how you
+partition your system, interrupts are done differently. For example, if you
+model a TLMu system with only a CPU core, the system might export very few
+interrupt lines to the main emulator (e.g modelling only the interrupt signals that enter the
+CPU core). If you have a TLMu system with internal
+devices, e.g an interrupt controller, TLMu might export 32 or 64 or even more
+interrupt lines to the main emulator.
+
+Regardless of how many interrupt lines and their exact meaning, the way the
+main emulator controls the lines is the same. It is done by notfiying events
+with the tlmu_notify_event() call.
+
+@example
+struct tlmu_irq tirq;
+
+tirq.data = 1; /* Raise interrupt line nr 0. Lower 1 - 31.  */
+tirq.addr = 0;
+tlmu_notify_event(t, TLMU_TLM_EVENT_IRQ, &tirq);
+
+tirq.data = 3; /* Raise interrupt line nr 32 and 33. Lower 34 - 63.  */
+tirq.addr = 4; /* Write to the second irq register.  */
+tlmu_notify_event(t, TLMU_TLM_EVENT_IRQ, &tirq);
+@end example
+
+TLMu exports a set of 32bit registers that represent the interrupt pending
+bits. With tlmu_notify_event, the main emulator can modify the current
+state and raise / lower interrupts.
+
+@subsection Direct Memory Interface
+
+The direct memory interface allows both TLMu and the main emulator to setup
+fast access to memory models. If calls to the bus_access callback or to the
+tlmu_bus_access return 1, it means that the accessed device is a candidate
+for DMI. To set up the actual mapping, TLMu will call the get_dmi_ptr
+callback or the main emulator should call the tlmu_get_dmi_ptr() function
+call.
+
+These calls take a struct tlmu_dmi pointer and fill it out.
+
+@example
+struct tlmu_dmi
+@{
+    void *ptr;                   /* Host pointer for direct access.  */
+    uint64_t base;               /* Physical address represented by *ptr.  */
+    uint64_t size;               /* Size of DMI mapping.  */
+    int prot;                    /* Protection bits.  */
+    unsigned int read_latency;   /* Read access delay.  */
+    unsigned int write_latency;  /* Write access delay.  */
+@};
+
+/*
+ * Try to setup direct memory access to a RAM (or RAM like device).
+ *
+ * t      - pointer to the TLMu instance
+ * dmi    - pointer to a tlmu_dmi structure to fill out.
+ *
+ * Return 1 if success.
+ */
+int tlmu_get_dmi_ptr(struct tlmu *t, struct tlmu_dmi *dmi);
+@end example
+
+@subsection Creating QEMU machines with TLMu support
+
+Modifying a QEMU machine to get TLMu connections is fairly easy. You need to
+include some tlmu header files.
+
+@example
+#include "tlm.h"
+#include "tlm_mem.h"
+@end example
+
+Then you need to leave some address space empty, the space you want to pass
+over to the main emulator. If you want, it can be the entire address space or
+only portions of it.
+
+Create tlm mappings:
+@example
+/*
+ * Map a TLMu area.
+ *
+ * env             - CPUState for the connected core.
+ * addr            - Base address
+ * size            - Size of mapping
+ * sync_period_ns  - Sync timer interval
+ * cpu_irq         - Interrupt lines
+ * nr_irq          - Number of interrupt lines
+ */
+void tlm_map(CPUState *env, uint64_t addr, uint64_t size,
+                           uint64_t sync_period_ns,
+                           qemu_irq *cpu_irq, uint32_t nr_irq);
+@end example
+
+You can create multiple mappings, but only the first last one may connect
+to interrupts. This limitation might be removed in the future.
+
+Good examples too look at are:
+
+@itemize
+@item
+hw/tlm_mach.c           - Bare TLMu cores for MIPS, ARM and CRIS
+@end itemize
+
+
+@section SystemC TLM-2.0 integration
+
+@subsection Overview
+An example on howto integrate TLMu into a SystemC TLM-2.0 system is provided
+in tests/tlmu/sc_example. There are many possible ways to connect TLMu into
+TLM-2.0, so sc_example is just one example of how it can be done. Let's look
+at it in more detail.
+
+@itemize
+@item
+tlmu_sc.cc      - System-C module wrapping TLMu
+@item
+iconnect.h      - Template of a generic TLM-2.0 interconnect
+@item
+memory.cc       - A TLM-2.0 RAM model
+@item
+magicdev.cc     - A TLM-2.0 device
+@item
+sc_example.cc   - System-C example app
+@end itemize
+
+@subsection tlmu_sc.cc
+The tlmu_sc class wraps TLMu into a System-C module with a set of TLM-2.0
+sockets and methods to interact with the QEMU based emulators.
+
+@subsection tlmu_sc TLM-2.0 methods
+The most common methods you'll need to use are:
+@itemize
+@item
+tlmu_sc    - Constructor used to create a TLMu instance
+@item
+map_ram    - Used to tell TLMu, which memory areas on your system that are RAMs
+@item
+append_arg - To setup the argument list for TLMu
+@item
+wake       - Used to tell TLMu to leave sleep mode
+@item
+sleep      - Used to tell TLMu to enter sleep mode
+@end itemize
+
+
+@subsection tlmu_sc TLM-2.0 sockets
+TLM-2.0 sockets:
+@itemize
+@item
+from_tlmu_sk    - Initiator socket used by TLMu to do transactions onto your TLM-2.0 bus
+@item
+to_tlmu_sk      - Target socket used to do transactions into TLMu
+@item
+to_tlmu_irq_sk  - Target socket used to signal interrupts to TLMu
+@end itemize
+
+For example, when emulating a bare CPU in TLMu, all memory accesses leave TLMu
+and get issued as transactions on the from_tlmu_sk initiator socket.
+
+If you are emulating a partial TLMu system (a CPU core with a set of
+peripherals), you can make bus accesses onto the TLMu bus by issuing
+transactions on the to_tlmu_sk target socket.
+
+If you need to signal an interrupt to a TLMu CPU, you can issue a transaction
+to the to_tlmu_irq_sk target socket. These transactions will write or read
+directly to/from the interrupt pending registers. See @ref{interrupts} for
+more info.
+
+@bye

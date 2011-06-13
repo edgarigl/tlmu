@@ -29,6 +29,16 @@ enum device_endian {
 /* address in the RAM (different from a physical address) */
 typedef unsigned long ram_addr_t;
 
+typedef struct TLM_RAMBlock {
+    int iodev;
+    void *opaque;
+    uint64_t base;
+    int (*bus_access)(void *opaque, int64_t clk, int rw,
+                       uint64_t addr, void *buf, int len);
+    void (*bus_access_dbg)(void *opaque, int64_t clk, int rw,
+                           uint64_t addr, void *buf, int len);
+} TLM_RAMBlock;
+
 /* memory API */
 
 typedef void CPUWriteMemoryFunc(void *opaque, target_phys_addr_t addr, uint32_t value);
@@ -57,6 +67,9 @@ static inline void cpu_register_physical_memory(target_phys_addr_t start_addr,
 }
 
 ram_addr_t cpu_get_physical_page_desc(target_phys_addr_t addr);
+ram_addr_t qemu_ram_alloc_from_ptr_2(DeviceState *dev, const char *name,
+                                   ram_addr_t size, void *host,
+                                   TLM_RAMBlock *tlm_rb);
 ram_addr_t qemu_ram_alloc_from_ptr(DeviceState *dev, const char *name,
                         ram_addr_t size, void *host);
 ram_addr_t qemu_ram_alloc(DeviceState *dev, const char *name, ram_addr_t size);
@@ -65,6 +78,10 @@ void qemu_ram_free_from_ptr(ram_addr_t addr);
 void qemu_ram_remap(ram_addr_t addr, ram_addr_t length);
 /* This should only be used for ram local to a device.  */
 void *qemu_get_ram_ptr(ram_addr_t addr);
+void *qemu_get_ram_base_ptr(ram_addr_t addr);
+int qemu_get_ram_len(ram_addr_t addr);
+void *qemu_map_paddr_to_host(target_phys_addr_t *paddr_p, int *len);
+TLM_RAMBlock *qemu_get_ram_tlmblock(ram_addr_t addr);
 /* Same but slower, to use for migration, where the order of
  * RAMBlocks must not change. */
 void *qemu_safe_ram_ptr(ram_addr_t addr);
@@ -78,7 +95,9 @@ int cpu_register_io_memory(CPUReadMemoryFunc * const *mem_read,
                            void *opaque, enum device_endian endian);
 void cpu_unregister_io_memory(int table_address);
 
-void cpu_physical_memory_rw(target_phys_addr_t addr, uint8_t *buf,
+int cpu_physical_memory_rw(target_phys_addr_t addr, uint8_t *buf,
+                            int len, int is_write);
+void cpu_physical_memory_rw_debug(target_phys_addr_t addr, uint8_t *buf,
                             int len, int is_write);
 static inline void cpu_physical_memory_read(target_phys_addr_t addr,
                                             void *buf, int len)

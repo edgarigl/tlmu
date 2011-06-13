@@ -60,6 +60,8 @@
 
 #endif /* CONFIG_LINUX */
 
+#include "tlm.h"
+
 static CPUState *next_cpu;
 
 /***********************************************************/
@@ -1108,6 +1110,9 @@ bool cpu_exec_all(void)
             break;
         }
     }
+    if (tlm_sync) {
+        tlm_sync(tlm_opaque, qemu_get_clock_ns(vm_clock));
+    }
     exit_request = 0;
     return !all_cpu_threads_idle();
 }
@@ -1150,7 +1155,7 @@ int64_t cpu_get_icount(void)
 
     icount = qemu_icount;
     if (env) {
-        if (!can_do_io(env)) {
+        if (!can_do_io(env) && !tlm_sync) {
             fprintf(stderr, "Bad clock read\n");
         }
         icount -= (env->icount_decr.u16.low + env->icount_extra);

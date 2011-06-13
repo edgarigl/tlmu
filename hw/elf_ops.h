@@ -253,7 +253,7 @@ static int glue(load_elf, SZ)(const char *name, int fd,
     total_size = 0;
     for(i = 0; i < ehdr.e_phnum; i++) {
         ph = &phdr[i];
-        if (ph->p_type == PT_LOAD) {
+        if (ph->p_type == PT_LOAD && ph->p_memsz) {
             mem_size = ph->p_memsz;
             /* XXX: avoid allocating */
             data = qemu_mallocz(mem_size);

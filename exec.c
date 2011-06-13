@@ -2197,6 +2197,39 @@ static void tlb_add_large_page(CPUState *env, target_ulong vaddr,
     env->tlb_flush_mask = mask;
 }
 
+/* TLM helper to map phys address into ram host ptr.  */
+void *qemu_map_paddr_to_host(target_phys_addr_t *paddr_p, int *len)
+{
+    TLM_RAMBlock *tlm_rb;
+    target_phys_addr_t paddr = *paddr_p;
+    PhysPageDesc *p;
+    unsigned long pd;
+    char *host, *host_base = NULL;
+    size_t offset;
+
+    p = phys_page_find(paddr >> TARGET_PAGE_BITS);
+    if (!p) {
+       return NULL;
+    }
+
+    pd = p->phys_offset;
+    if ((pd & ~TARGET_PAGE_MASK) <= IO_MEM_ROM) {
+        /* FIXME: Simplify!!!  */
+        host = qemu_get_ram_ptr(pd & TARGET_PAGE_MASK);
+        host += paddr & ~TARGET_PAGE_MASK;
+        host_base = qemu_get_ram_base_ptr(pd & TARGET_PAGE_MASK);
+        offset = host - host_base;
+        *paddr_p = paddr - offset;
+        *len = qemu_get_ram_len(pd & TARGET_PAGE_MASK);
+        tlm_rb = qemu_get_ram_tlmblock(pd & TARGET_PAGE_MASK);
+        if (tlm_rb) {
+            /* I assume we should try to bridge the DMI request from here?  */
+            host_base = NULL;
+        }
+    }
+    return host_base;
+}
+
 /* Add a new TLB entry. At most one entry for a given virtual address
    is permitted. Only a single TARGET_PAGE_SIZE region is mapped, the
    supplied size is only used by tlb_flush_page.  */
@@ -2213,6 +2246,7 @@ void tlb_set_page(CPUState *env, target_ulong vaddr,
     CPUTLBEntry *te;
     CPUWatchpoint *wp;
     target_phys_addr_t iotlb;
+    TLM_RAMBlock *tlm_rb = NULL;
 
     assert(size >= TARGET_PAGE_SIZE);
     if (size != TARGET_PAGE_SIZE) {
@@ -2237,6 +2271,7 @@ void tlb_set_page(CPUState *env, target_ulong vaddr,
     }
     addend = (unsigned long)qemu_get_ram_ptr(pd & TARGET_PAGE_MASK);
     if ((pd & ~TARGET_PAGE_MASK) <= IO_MEM_ROM) {
+        tlm_rb = qemu_get_ram_tlmblock(pd & TARGET_PAGE_MASK);
         /* Normal RAM.  */
         iotlb = pd & TARGET_PAGE_MASK;
         if ((pd & ~TARGET_PAGE_MASK) == IO_MEM_RAM)
@@ -2258,6 +2293,10 @@ void tlb_set_page(CPUState *env, target_ulong vaddr,
         }
     }
 
+    if (tlm_rb) {
+        address |= TLB_MMIO;
+        iotlb = tlm_rb->iodev + paddr - tlm_rb->base;
+    }
     code_address = address;
     /* Make accesses to pages with watchpoints go via the
        watchpoint trap routines.  */
@@ -2866,8 +2905,9 @@ static ram_addr_t last_ram_offset(void)
     return last;
 }
 
-ram_addr_t qemu_ram_alloc_from_ptr(DeviceState *dev, const char *name,
-                                   ram_addr_t size, void *host)
+ram_addr_t qemu_ram_alloc_from_ptr_2(DeviceState *dev, const char *name,
+                                   ram_addr_t size, void *host,
+                                   TLM_RAMBlock *tlm_rb)
 {
     RAMBlock *new_block, *block;
 
@@ -2892,9 +2932,12 @@ ram_addr_t qemu_ram_alloc_from_ptr(DeviceState *dev, const char *name,
     }
 
     new_block->offset = find_ram_offset(size);
-    if (host) {
+    if (host || tlm_rb) {
         new_block->host = host;
         new_block->flags |= RAM_PREALLOC_MASK;
+        if (tlm_rb) {
+            new_block->TLM = *tlm_rb;
+        }
     } else {
         if (mem_path) {
 #if defined (__linux__) && !defined(TARGET_S390X)
@@ -2946,6 +2989,11 @@ ram_addr_t qemu_ram_alloc_from_ptr(DeviceState *dev, const char *name,
     return new_block->offset;
 }
 
+ram_addr_t qemu_ram_alloc_from_ptr(DeviceState *dev, const char *name,
+                                   ram_addr_t size, void *host)
+{
+    return qemu_ram_alloc_from_ptr_2(dev, name, size, host, NULL);
+}
 ram_addr_t qemu_ram_alloc(DeviceState *dev, const char *name, ram_addr_t size)
 {
     return qemu_ram_alloc_from_ptr(dev, name, size, NULL);
@@ -3092,6 +3140,70 @@ void *qemu_get_ram_ptr(ram_addr_t addr)
                 }
             }
             return block->host + (addr - block->offset);
+        }
+    }
+
+    fprintf(stderr, "Bad ram offset %" PRIx64 "\n", (uint64_t)addr);
+    abort();
+
+    return NULL;
+}
+
+void *qemu_get_ram_base_ptr(ram_addr_t addr)
+{
+    RAMBlock *block;
+
+    QLIST_FOREACH(block, &ram_list.blocks, next) {
+        if (addr - block->offset < block->length) {
+            /* Move this entry to to start of the list.  */
+            if (block != QLIST_FIRST(&ram_list.blocks)) {
+                QLIST_REMOVE(block, next);
+                QLIST_INSERT_HEAD(&ram_list.blocks, block, next);
+            }
+            return block->host;
+        }
+    }
+
+    fprintf(stderr, "Bad ram offset %" PRIx64 "\n", (uint64_t)addr);
+    abort();
+
+    return NULL;
+}
+
+int qemu_get_ram_len(ram_addr_t addr)
+{
+    RAMBlock *block;
+
+    QLIST_FOREACH(block, &ram_list.blocks, next) {
+        if (addr - block->offset < block->length) {
+            /* Move this entry to to start of the list.  */
+            if (block != QLIST_FIRST(&ram_list.blocks)) {
+                QLIST_REMOVE(block, next);
+                QLIST_INSERT_HEAD(&ram_list.blocks, block, next);
+            }
+            return block->length;
+        }
+    }
+
+    fprintf(stderr, "Bad ram offset %" PRIx64 "\n", (uint64_t)addr);
+    abort();
+
+    return -1;
+}
+
+TLM_RAMBlock *qemu_get_ram_tlmblock(ram_addr_t addr)
+{
+    RAMBlock *block;
+
+    QLIST_FOREACH(block, &ram_list.blocks, next) {
+        if (addr - block->offset < block->length) {
+            QLIST_REMOVE(block, next);
+            QLIST_INSERT_HEAD(&ram_list.blocks, block, next);
+            if (block->TLM.opaque) {
+                return &block->TLM;
+            } else {
+                return NULL;
+            }
         }
     }
 
@@ -3321,6 +3433,26 @@ static void notdirty_mem_writel(void *opaque, target_phys_addr_t ram_addr,
        flushed */
     if (dirty_flags == 0xff)
         tlb_set_dirty(cpu_single_env, cpu_single_env->mem_io_vaddr);
+}
+
+void notdirty_mem_wr(target_phys_addr_t addr, int len);
+void notdirty_mem_wr(target_phys_addr_t addr, int len)
+{
+    intptr_t addr_p = addr;
+    ram_addr_t ram_addr;
+
+    qemu_ram_addr_from_host((void *)addr_p, &ram_addr);
+
+    if (!cpu_physical_memory_is_dirty(ram_addr)) {
+        ram_addr_t ramaddr = 0;
+
+        qemu_ram_addr_from_host((void *)(unsigned long) addr, &ramaddr);
+        /* invalidate code */
+        tb_invalidate_phys_page_range(ramaddr, ramaddr + len, 0);
+        /* set dirty bit */
+        cpu_physical_memory_set_dirty_flags(addr,
+           (0xff & ~CODE_DIRTY_FLAG));
+    }
 }
 
 static CPUReadMemoryFunc * const error_mem_read[3] = {
@@ -3807,8 +3939,8 @@ int cpu_memory_rw_debug(CPUState *env, target_ulong addr,
 }
 
 #else
-void cpu_physical_memory_rw(target_phys_addr_t addr, uint8_t *buf,
-                            int len, int is_write)
+static int cpu_physical_memory_rw1(target_phys_addr_t addr, uint8_t *buf,
+                            int len, int is_write, int is_debug)
 {
     int l, io_index;
     uint8_t *ptr;
@@ -3816,6 +3948,8 @@ void cpu_physical_memory_rw(target_phys_addr_t addr, uint8_t *buf,
     target_phys_addr_t page;
     unsigned long pd;
     PhysPageDesc *p;
+    TLM_RAMBlock *tl;
+    int is_ram = 0;
 
     while (len > 0) {
         page = addr & TARGET_PAGE_MASK;
@@ -3858,7 +3992,18 @@ void cpu_physical_memory_rw(target_phys_addr_t addr, uint8_t *buf,
                 addr1 = (pd & TARGET_PAGE_MASK) + (addr & ~TARGET_PAGE_MASK);
                 /* RAM case */
                 ptr = qemu_get_ram_ptr(addr1);
-                memcpy(ptr, buf, l);
+                tl = qemu_get_ram_tlmblock(addr1);
+                is_ram = 1;
+                if (tl) {
+                    if (is_debug) {
+                        tl->bus_access_dbg(tl->opaque, -1, 1, addr,
+                                             (void *) buf, l);
+                    } else {
+                        tl->bus_access(tl->opaque, -1, 1, addr, (void *) buf, l);
+                    }
+                } else {
+                    memcpy(ptr, buf, l);
+                }
                 if (!cpu_physical_memory_is_dirty(addr1)) {
                     /* invalidate code */
                     tb_invalidate_phys_page_range(addr1, addr1 + l, 0);
@@ -3894,15 +4039,43 @@ void cpu_physical_memory_rw(target_phys_addr_t addr, uint8_t *buf,
                 }
             } else {
                 /* RAM case */
-                ptr = qemu_get_ram_ptr(pd & TARGET_PAGE_MASK);
-                memcpy(buf, ptr + (addr & ~TARGET_PAGE_MASK), l);
-                qemu_put_ram_ptr(ptr);
+                void *bptr;
+
+                bptr = ptr = qemu_get_ram_ptr(pd & TARGET_PAGE_MASK);
+                ptr += (addr & ~TARGET_PAGE_MASK);
+                tl = qemu_get_ram_tlmblock(pd & TARGET_PAGE_MASK);
+                is_ram = 1;
+                if (tl) {
+                    if (is_debug) {
+                        tl->bus_access_dbg(tl->opaque, -1, 0,
+                                             addr, (void *) buf, l);
+                    } else {
+                        tl->bus_access(tl->opaque, -1, 0,
+                                             addr, (void *) buf, l);
+                    }
+                } else {
+                    memcpy(buf, ptr, l);
+                }
+                qemu_put_ram_ptr(bptr);
             }
         }
         len -= l;
         buf += l;
         addr += l;
     }
+    return is_ram;
+}
+
+int cpu_physical_memory_rw(target_phys_addr_t addr, uint8_t *buf,
+                            int len, int is_write)
+{
+    return cpu_physical_memory_rw1(addr, buf, len, is_write, 0);
+}
+
+void cpu_physical_memory_rw_debug(target_phys_addr_t addr, uint8_t *buf,
+                                  int len, int is_write)
+{
+    cpu_physical_memory_rw1(addr, buf, len, is_write, 1);
 }
 
 /* used for ROM loading : can write in RAM and ROM */
@@ -3933,10 +4106,18 @@ void cpu_physical_memory_write_rom(target_phys_addr_t addr,
             /* do nothing */
         } else {
             unsigned long addr1;
+            TLM_RAMBlock *tl;
+
             addr1 = (pd & TARGET_PAGE_MASK) + (addr & ~TARGET_PAGE_MASK);
             /* ROM/RAM case */
             ptr = qemu_get_ram_ptr(addr1);
-            memcpy(ptr, buf, l);
+            tl = qemu_get_ram_tlmblock(addr1);
+            if (tl) {
+                tl->bus_access_dbg(tl->opaque, -1, 1,
+                                     addr, (void *) buf, len);
+            } else {
+                memcpy(ptr, buf, l);
+            }
             qemu_put_ram_ptr(ptr);
         }
         len -= l;
@@ -4386,7 +4567,7 @@ int cpu_memory_rw_debug(CPUState *env, target_ulong addr,
         if (is_write)
             cpu_physical_memory_write_rom(phys_addr, buf, l);
         else
-            cpu_physical_memory_rw(phys_addr, buf, l, is_write);
+            cpu_physical_memory_rw1(phys_addr, buf, l, is_write, 1);
         len -= l;
         buf += l;
         addr += l;

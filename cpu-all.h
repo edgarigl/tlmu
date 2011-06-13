@@ -925,6 +925,8 @@ typedef struct RAMBlock {
     uint32_t flags;
     char idstr[256];
     QLIST_ENTRY(RAMBlock) next;
+
+    TLM_RAMBlock TLM;
 #if defined(__linux__) && !defined(TARGET_S390X)
     int fd;
 #endif

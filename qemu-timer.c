@@ -46,6 +46,8 @@
 
 #include "qemu-timer.h"
 
+#include "tlm.h"
+
 /* Conversion factor from emulated instructions to virtual clock ticks.  */
 int icount_time_shift;
 /* Arbitrarily pick 1MIPS as the minimum allowable speed.  */
@@ -221,6 +223,10 @@ static void unix_stop_timer(struct qemu_alarm_timer *t);
 
 #ifdef __linux__
 
+static int tlm_start_timer(struct qemu_alarm_timer *t);
+static void tlm_stop_timer(struct qemu_alarm_timer *t);
+static void tlm_rearm_timer(struct qemu_alarm_timer *t);
+
 static int dynticks_start_timer(struct qemu_alarm_timer *t);
 static void dynticks_stop_timer(struct qemu_alarm_timer *t);
 static void dynticks_rearm_timer(struct qemu_alarm_timer *t);
@@ -289,6 +295,7 @@ static struct qemu_alarm_timer alarm_timers[] = {
 #ifdef __linux__
     {"dynticks", dynticks_start_timer,
      dynticks_stop_timer, dynticks_rearm_timer},
+    {"tlm", tlm_start_timer, tlm_stop_timer, tlm_rearm_timer},
 #endif
     {"unix", unix_start_timer, unix_stop_timer, NULL},
 #else
@@ -880,6 +887,39 @@ static void dynticks_rearm_timer(struct qemu_alarm_timer *t)
         perror("settime");
         fprintf(stderr, "Internal timer error: aborting\n");
         exit(1);
+    }
+}
+
+static void tlm_timer_handler(void *o)
+{
+    host_alarm_handler(SIGALRM);
+}
+
+static void tlm_stop_timer(struct qemu_alarm_timer *t)
+{
+}
+
+static int tlm_start_timer(struct qemu_alarm_timer *t)
+{
+    return 0;
+}
+
+static void tlm_rearm_timer(struct qemu_alarm_timer *t)
+{
+    int64_t nearest_delta_ns = INT64_MAX;
+
+    if (!active_timers[QEMU_CLOCK_REALTIME] &&
+        !active_timers[QEMU_CLOCK_VIRTUAL] &&
+        !active_timers[QEMU_CLOCK_HOST])
+        return;
+
+    nearest_delta_ns = qemu_next_alarm_deadline();
+    if (nearest_delta_ns < MIN_TIMER_REARM_NS)
+        nearest_delta_ns = MIN_TIMER_REARM_NS;
+
+    if (tlm_timer_start) {
+        tlm_timer_start(tlm_timer_opaque, NULL,
+                        tlm_timer_handler, nearest_delta_ns);
     }
 }
 

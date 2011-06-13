@@ -1,8 +1,5 @@
 /*
- * posix specific declarations
- *
- * Copyright (c) 2003-2008 Fabrice Bellard
- * Copyright (c) 2010 Jes Sorensen <Jes.Sorensen@redhat.com>
+ * Copyright (c) 2011 Edgar E. Iglesias.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,32 +20,14 @@
  * THE SOFTWARE.
  */
 
-#ifndef QEMU_OS_POSIX_H
-#define QEMU_OS_POSIX_H
-
-static inline void os_host_main_loop_wait(int *timeout)
+class magicdev
+: public sc_core::sc_module
 {
-}
+public:
+	tlm_utils::simple_target_socket<magicdev> socket;
 
-void os_set_line_buffering(void);
-void os_set_proc_name(const char *s);
-void os_setup_signal_handling(int ignore_sigint);
-void os_daemonize(void);
-void os_setup_post(void);
-
-typedef struct timeval qemu_timeval;
-#define qemu_gettimeofday(tp) gettimeofday(tp, NULL)
-
-#ifndef CONFIG_UTIMENSAT
-#ifndef UTIME_NOW
-# define UTIME_NOW     ((1l << 30) - 1l)
-#endif
-#ifndef UTIME_OMIT
-# define UTIME_OMIT    ((1l << 30) - 2l)
-#endif
-#endif
-typedef struct timespec qemu_timespec;
-int qemu_utimensat(int dirfd, const char *path, const qemu_timespec *times,
-    int flags);
-
-#endif
+	magicdev(sc_core::sc_module_name name);
+	virtual void b_transport(tlm::tlm_generic_payload& trans,
+					sc_time& delay);
+	virtual unsigned int transport_dbg(tlm::tlm_generic_payload& trans);
+};
