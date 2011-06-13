@@ -32,7 +32,7 @@ $(call set-vpath, $(SRC_PATH):$(SRC_PATH)/hw)
 LIBS+=-lz $(LIBS_TOOLS)
 
 ifdef BUILD_DOCS
-DOCS=qemu-doc.html qemu-tech.html qemu.1 qemu-img.1 qemu-nbd.8 QMP/qmp-commands.txt
+DOCS=tlmu-doc.html qemu-doc.html qemu-tech.html qemu.1 qemu-img.1 qemu-nbd.8 QMP/qmp-commands.txt
 else
 DOCS=
 endif
@@ -145,6 +145,17 @@ check-qjson: check-qjson.o qfloat.o qint.o qdict.o qstring.o qlist.o qbool.o qjs
 
 QEMULIBS=libhw32 libhw64 libuser libdis libdis-user
 
+tlmu:
+	for a in $(TARGET_DIRS); do $(MAKE) -C $$a tlmu; done
+
+libtlmu.a: tlmu.o
+	$(AR) -r $@ $<
+
+install-tlmu: libtlmu.a
+	for a in $(TARGET_DIRS); do $(MAKE) -C $$a install-tlmu; done
+	$(INSTALL) -D libtlmu.a $(DESTDIR)/lib/libtlmu.a
+	$(INSTALL) -D $(SRC_PATH)/tlmu.h $(DESTDIR)/include/tlmu/tlmu.h
+
 clean:
 # avoid old build problems by removing potentially incorrect old files
 	rm -f config.mak op-i386.h opc-i386.h gen-op-i386.h op-arm.h opc-arm.h gen-op-arm.h
@@ -165,6 +176,10 @@ distclean: clean
 	rm -f config-host.mak config-host.h* config-host.ld $(DOCS) qemu-options.texi qemu-img-cmds.texi qemu-monitor.texi
 	rm -f config-all-devices.mak
 	rm -f roms/seabios/config.mak roms/vgabios/config.mak
+	rm -f tlmu-doc.info tlmu-doc.aux tlmu-doc.cp tlmu-doc.cps tlmu-doc.dvi
+	rm -f tlmu-doc.fn tlmu-doc.fns tlmu-doc.info tlmu-doc.ky tlmu-doc.kys
+	rm -f tlmu-doc.log tlmu-doc.pdf tlmu-doc.pg tlmu-doc.toc tlmu-doc.tp
+	rm -f tlmu-doc.vr
 	rm -f qemu-doc.info qemu-doc.aux qemu-doc.cp qemu-doc.cps qemu-doc.dvi
 	rm -f qemu-doc.fn qemu-doc.fns qemu-doc.info qemu-doc.ky qemu-doc.kys
 	rm -f qemu-doc.log qemu-doc.pdf qemu-doc.pg qemu-doc.toc qemu-doc.tp
@@ -195,7 +210,7 @@ endif
 
 install-doc: $(DOCS)
 	$(INSTALL_DIR) "$(DESTDIR)$(docdir)"
-	$(INSTALL_DATA) qemu-doc.html  qemu-tech.html "$(DESTDIR)$(docdir)"
+	$(INSTALL_DATA) tlmu-doc.html qemu-doc.html  qemu-tech.html "$(DESTDIR)$(docdir)"
 ifdef CONFIG_POSIX
 	$(INSTALL_DIR) "$(DESTDIR)$(mandir)/man1"
 	$(INSTALL_DATA) qemu.1 qemu-img.1 "$(DESTDIR)$(mandir)/man1"
@@ -268,6 +283,12 @@ QMP/qmp-commands.txt: $(SRC_PATH)/qmp-commands.hx
 qemu-img-cmds.texi: $(SRC_PATH)/qemu-img-cmds.hx
 	$(call quiet-command,sh $(SRC_PATH)/scripts/hxtool -t < $< > $@,"  GEN   $@")
 
+tlmu.1: tlmu-doc.texi
+	$(call quiet-command, \
+	  perl -Ww -- $(SRC_PATH)/scripts/texi2pod.pl $< tlmu.pod && \
+	  pod2man --section=1 --center=" " --release=" " tlmu.pod > $@, \
+	  "  GEN   $@")
+
 qemu.1: qemu-doc.texi qemu-options.texi qemu-monitor.texi
 	$(call quiet-command, \
 	  perl -Ww -- $(SRC_PATH)/scripts/texi2pod.pl $< qemu.pod && \
@@ -286,10 +307,10 @@ qemu-nbd.8: qemu-nbd.texi
 	  pod2man --section=8 --center=" " --release=" " qemu-nbd.pod > $@, \
 	  "  GEN   $@")
 
-dvi: qemu-doc.dvi qemu-tech.dvi
-html: qemu-doc.html qemu-tech.html
-info: qemu-doc.info qemu-tech.info
-pdf: qemu-doc.pdf qemu-tech.pdf
+dvi: tlmu-doc.dvi qemu-doc.dvi qemu-tech.dvi
+html: tlmu-doc.html qemu-doc.html qemu-tech.html
+info: tlmu-doc.info qemu-doc.info qemu-tech.info
+pdf: tlmu-doc.pdf qemu-doc.pdf qemu-tech.pdf
 
 qemu-doc.dvi qemu-doc.html qemu-doc.info qemu-doc.pdf: \
 	qemu-img.texi qemu-nbd.texi qemu-options.texi \
@@ -336,6 +357,7 @@ tarbin:
 	$(datadir)/pxe-pcnet.rom \
 	$(datadir)/pxe-rtl8139.rom \
 	$(datadir)/pxe-virtio.rom \
+	$(docdir)/tlmu-doc.html \
 	$(docdir)/qemu-doc.html \
 	$(docdir)/qemu-tech.html \
 	$(mandir)/man1/qemu.1 \

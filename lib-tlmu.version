@@ -1,0 +1,23 @@
+FOO {
+  global:
+          tlm_map_ram;
+          cpu_set_log_filename;
+          tlm_image_load_base;
+          tlm_image_load_size;
+          tlm_opaque;
+          tlm_notify_event;
+          tlm_timer_opaque;
+          tlm_timer_start;
+          tlm_sync;
+          tlm_sync_period_ns;
+          tlm_boot_state;
+          tlm_bus_access_cb;
+          tlm_bus_access_dbg_cb;
+          tlm_bus_access;
+          tlm_bus_access_dbg;
+          tlm_get_dmi_ptr_cb;
+          tlm_get_dmi_ptr;
+          vl_main;
+  local: *;         # hide everything else
+};
+

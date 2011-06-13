@@ -309,6 +309,7 @@ static inline tb_page_addr_t get_page_addr_code(CPUState *env1, target_ulong add
     return addr;
 }
 #else
+int tlm_iodev_is_ram(int iodev);
 /* NOTE: this function can trigger an exception */
 /* NOTE2: the returned address is not exactly the physical address: it
    is the offset relative to phys_ram_base */
@@ -325,11 +326,18 @@ static inline tb_page_addr_t get_page_addr_code(CPUState *env1, target_ulong add
     }
     pd = env1->tlb_table[mmu_idx][page_index].addr_code & ~TARGET_PAGE_MASK;
     if (pd > IO_MEM_ROM && !(pd & IO_MEM_ROMD)) {
-#if defined(TARGET_SPARC) || defined(TARGET_MIPS)
-        do_unassigned_access(addr, 0, 1, 0, 4);
-#else
-        cpu_abort(env1, "Trying to execute code outside RAM or ROM at 0x" TARGET_FMT_lx "\n", addr);
-#endif
+         target_phys_addr_t mmio, paddr;
+         mmio = env1->tlb_table[mmu_idx][page_index].addr_code & TLB_MMIO;
+
+         paddr = env1->iotlb[mmu_idx][page_index];
+         paddr >>= IO_MEM_SHIFT;
+         paddr &= (IO_MEM_NB_ENTRIES - 1);
+         if (mmio && tlm_iodev_is_ram(paddr)) {
+             return qemu_ram_addr_from_host_nofail((void *)(unsigned long)addr);
+         } else {
+             cpu_abort(env1, "Trying to execute code outside RAM or ROM at 0x"
+                              TARGET_FMT_lx "\n", addr);
+         }
     }
     p = (void *)(unsigned long)addr
         + env1->tlb_table[mmu_idx][page_index].addend;

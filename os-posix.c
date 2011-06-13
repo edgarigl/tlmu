@@ -67,14 +67,16 @@ static void termsig_handler(int signal, siginfo_t *info, void *c)
     qemu_system_killed(info->si_signo, info->si_pid);
 }
 
-void os_setup_signal_handling(void)
+void os_setup_signal_handling(int ignore_sigint)
 {
     struct sigaction act;
 
     memset(&act, 0, sizeof(act));
     act.sa_sigaction = termsig_handler;
     act.sa_flags = SA_SIGINFO;
-    sigaction(SIGINT,  &act, NULL);
+    if (ignore_sigint) {
+        sigaction(SIGINT,  &act, NULL);
+    }
     sigaction(SIGHUP,  &act, NULL);
     sigaction(SIGTERM, &act, NULL);
 }

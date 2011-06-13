@@ -27,6 +27,7 @@ ifeq ($(TARGET_ARCH), i386)
 QEMU_PROG=qemu$(EXESUF)
 else
 QEMU_PROG=qemu-system-$(TARGET_ARCH2)$(EXESUF)
+LIB_TLMU=libtlmu-$(TARGET_ARCH2).so
 endif
 endif
 
@@ -63,6 +64,7 @@ stap:
 endif
 
 all: $(PROGS) stap
+tlmu: all $(LIB_TLMU)
 
 # Dummy command so that make thinks it has done something
 	@true
@@ -80,6 +82,7 @@ libobj-$(CONFIG_NEED_MMU) += mmu.o
 libobj-$(TARGET_ARM) += neon_helper.o iwmmxt_helper.o
 
 libobj-y += disas.o
+libobj-y += tlm.o
 
 $(libobj-y): $(GENERATED_HEADERS)
 
@@ -297,6 +300,8 @@ obj-mips-y += g364fb.o jazz_led.o
 obj-mips-y += gt64xxx.o mc146818rtc.o
 obj-mips-y += cirrus_vga.o
 obj-mips-$(CONFIG_FULONG) += bonito.o vt82c686.o mips_fulong2e.o
+obj-mips-y += tlm_mach.o
+obj-mips-y += tlm_mem.o
 
 obj-microblaze-y = petalogix_s3adsp1800_mmu.o
 obj-microblaze-y += petalogix_ml605_mmu.o
@@ -316,6 +321,8 @@ obj-cris-y = cris_pic_cpu.o
 obj-cris-y += cris-boot.o
 obj-cris-y += etraxfs.o axis_dev88.o
 obj-cris-y += axis_dev88.o
+obj-cris-y += tlm_mach.o
+obj-cris-y += tlm_mem.o
 
 # IO blocks
 obj-cris-y += etraxfs_dma.o
@@ -364,6 +371,9 @@ obj-arm-y += syborg_virtio.o
 obj-arm-y += vexpress.o
 obj-arm-y += strongarm.o
 obj-arm-y += collie.o
+obj-arm-y += tlm_mach.o
+obj-arm-y += tlm_mem.o
+
 
 obj-sh4-y = shix.o r2d.o sh7750.o sh7750_regnames.o tc58128.o
 obj-sh4-y += sh_timer.o sh_serial.o sh_intc.o sh_pci.o sm501.o
@@ -401,6 +411,13 @@ obj-$(CONFIG_GDBSTUB_XML) += gdbstub-xml.o
 $(QEMU_PROG): $(obj-y) $(obj-$(TARGET_BASE_ARCH)-y)
 	$(call LINK,$(obj-y) $(obj-$(TARGET_BASE_ARCH)-y))
 
+tobj-y = $(obj-y)
+tobj-y += $(obj-$(TARGET_BASE_ARCH)-y)
+
+$(LIB_TLMU): $(tobj-y)
+	$(CC) -shared -Wl,-soname,$(LIB_TLMU) \
+	        -Wl,--version-script=$(SRC_PATH)/lib-tlmu.version \
+	        --whole-archive -o $@ $+ -pthread $(LIBS)
 
 gdbstub-xml.c: $(TARGET_XML_FILES) $(SRC_PATH)/scripts/feature_to_c.sh
 	$(call quiet-command,rm -f $@ && $(SHELL) $(SRC_PATH)/scripts/feature_to_c.sh $@ $(TARGET_XML_FILES),"  GEN   $(TARGET_DIR)$@")
@@ -417,6 +434,13 @@ clean:
 	rm -f hmp-commands.h qmp-commands.h gdbstub-xml.c
 ifdef CONFIG_SYSTEMTAP_TRACE
 	rm -f *.stp
+endif
+
+install-tlmu: $(LIB_TLMU)
+	$(INSTALL) -D -m 755 $(LIB_TLMU) "$(DESTDIR)/lib/$(LIB_TLMU)"
+	$(INSTALL) -D $(SRC_PATH)/tlmu-qemuif.h "$(DESTDIR)/include/tlmu/tlmu-qemuif.h"
+ifneq ($(STRIP),)
+	$(STRIP) $(DESTDIR)/lib/$(LIB_TLMU)
 endif
 
 install: all

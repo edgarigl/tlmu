@@ -48,7 +48,7 @@ void qemu_del_wait_object(HANDLE handle, WaitObjectFunc *func, void *opaque);
 
 void os_host_main_loop_wait(int *timeout);
 
-static inline void os_setup_signal_handling(void) {}
+static inline void os_setup_signal_handling(int ignore_sigint) {}
 static inline void os_daemonize(void) {}
 static inline void os_setup_post(void) {}
 void os_set_line_buffering(void);

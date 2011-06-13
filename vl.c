@@ -2036,7 +2036,16 @@ static const QEMUOption *lookup_opt(int argc, char **argv,
     return popt;
 }
 
+int vl_main(int ignore_sigint, int no_sdl, int no_gui_timer,
+            int argc, char **argv, char **envp);
+
 int main(int argc, char **argv, char **envp)
+{
+    return vl_main(1, 0, 0, argc, argv, envp);
+}
+
+int vl_main(int ignore_sigint, int no_sdl, int no_gui_timer,
+            int argc, char **argv, char **envp)
 {
     const char *gdbstub_dev = NULL;
     int i;
@@ -3205,7 +3214,9 @@ int main(int argc, char **argv, char **envp)
 #endif
 #if defined(CONFIG_SDL)
     case DT_SDL:
-        sdl_display_init(ds, full_screen, no_frame);
+        if (!no_sdl) {
+            sdl_display_init(ds, full_screen, no_frame);
+        }
         break;
 #elif defined(CONFIG_COCOA)
     case DT_SDL:
@@ -3217,7 +3228,7 @@ int main(int argc, char **argv, char **envp)
     }
 
     /* must be after terminal init, SDL library changes signal handlers */
-    os_setup_signal_handling();
+    os_setup_signal_handling(ignore_sigint);
 
 #ifdef CONFIG_VNC
     /* init remote displays */
@@ -3248,7 +3259,7 @@ int main(int argc, char **argv, char **envp)
         }
         dcl = dcl->next;
     }
-    if (ds->gui_timer == NULL) {
+    if (ds->gui_timer == NULL && !no_gui_timer) {
         nographic_timer = qemu_new_timer_ms(rt_clock, nographic_update, NULL);
         qemu_mod_timer(nographic_timer, qemu_get_clock_ms(rt_clock));
     }
