@@ -359,7 +359,7 @@ void tlmu_sc::process(void)
 	}
 
 	/* Debug.  */
-       	if (tracing) {
+	if (tracing & TRACING_EXEC) {
 		tlmu_append_arg(&q, "-d");
 		tlmu_append_arg(&q, "in_asm,exec,cpu");
 	}

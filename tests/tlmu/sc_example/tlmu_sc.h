@@ -38,7 +38,9 @@ class tlmu_sc
 public:
 	enum {
 		TRACING_OFF	= 0,
-		TRACING_ON	= 1
+		TRACING_EXEC	= 1,
+		TRACING_PROF	= 2,
+		TRACING_COV	= 4
 	};
 
 	tlm_utils::simple_initiator_socket<tlmu_sc> from_tlmu_sk;
