@@ -27,8 +27,8 @@ ifeq ($(TARGET_ARCH), i386)
 QEMU_PROG=qemu$(EXESUF)
 else
 QEMU_PROG=qemu-system-$(TARGET_ARCH2)$(EXESUF)
-LIB_TLMU=libtlmu-$(TARGET_ARCH2).so
 endif
+LIB_TLMU=libtlmu-$(TARGET_ARCH2).so
 endif
 
 PROGS=$(QEMU_PROG)
@@ -438,10 +438,12 @@ ifdef CONFIG_SYSTEMTAP_TRACE
 endif
 
 install-tlmu: $(LIB_TLMU)
+ifneq ($(LIB_TLMU),)
 	$(INSTALL) -D -m 755 $(LIB_TLMU) "$(DESTDIR)/lib/$(LIB_TLMU)"
 	$(INSTALL) -D $(SRC_PATH)/tlmu-qemuif.h "$(DESTDIR)/include/tlmu/tlmu-qemuif.h"
 ifneq ($(STRIP),)
 	$(STRIP) $(DESTDIR)/lib/$(LIB_TLMU)
+endif
 endif
 
 install: all
