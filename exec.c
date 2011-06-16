@@ -3439,14 +3439,11 @@ void notdirty_mem_wr(target_phys_addr_t addr, int len);
 void notdirty_mem_wr(target_phys_addr_t addr, int len)
 {
     intptr_t addr_p = addr;
-    ram_addr_t ram_addr;
+    ram_addr_t ramaddr = ~0;
 
-    qemu_ram_addr_from_host((void *)addr_p, &ram_addr);
+    qemu_ram_addr_from_host((void *)addr_p, &ramaddr);
 
-    if (!cpu_physical_memory_is_dirty(ram_addr)) {
-        ram_addr_t ramaddr = 0;
-
-        qemu_ram_addr_from_host((void *)(unsigned long) addr, &ramaddr);
+    if (!cpu_physical_memory_is_dirty(ramaddr)) {
         /* invalidate code */
         tb_invalidate_phys_page_range(ramaddr, ramaddr + len, 0);
         /* set dirty bit */
