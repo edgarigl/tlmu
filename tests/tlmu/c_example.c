@@ -176,7 +176,8 @@ int main(int argc, char **argv)
 		err = tlmu_load(&sys[i].t.q, sys[i].soname);
 		if (err) {
 			printf("failed to load tlmu %s\n", sys[i].soname);
-			exit(1);
+			i++;
+			continue;
 		}
 
 		/* Use the bare CPU core.  */
@@ -232,7 +233,9 @@ int main(int argc, char **argv)
 
 	i = 0;
 	while (sys[i].name) {
-		pthread_join(sys[i].tid, NULL);
+		if (sys[i].tid) {
+			pthread_join(sys[i].tid, NULL);
+		}
 		i++;
 	}
 	return 0;
