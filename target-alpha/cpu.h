@@ -28,8 +28,6 @@
 
 #include "cpu-defs.h"
 
-#include <setjmp.h>
-
 #include "softfloat.h"
 
 #define TARGET_HAS_ICE 1
@@ -428,7 +426,7 @@ int cpu_alpha_exec(CPUAlphaState *s);
 int cpu_alpha_signal_handler(int host_signum, void *pinfo,
                              void *puc);
 int cpu_alpha_handle_mmu_fault (CPUState *env, uint64_t address, int rw,
-                                int mmu_idx, int is_softmmu);
+                                int mmu_idx);
 #define cpu_handle_mmu_fault cpu_alpha_handle_mmu_fault
 void do_interrupt (CPUState *env);
 
@@ -436,8 +434,9 @@ uint64_t cpu_alpha_load_fpcr (CPUState *env);
 void cpu_alpha_store_fpcr (CPUState *env, uint64_t val);
 #ifndef CONFIG_USER_ONLY
 void swap_shadow_regs(CPUState *env);
-extern QEMU_NORETURN void do_unassigned_access(target_phys_addr_t addr,
-                                               int, int, int, int);
+QEMU_NORETURN void cpu_unassigned_access(CPUState *env1,
+                                         target_phys_addr_t addr, int is_write,
+                                         int is_exec, int unused, int size);
 #endif
 
 /* Bits in TB->FLAGS that control how translation is processed.  */
@@ -491,5 +490,27 @@ static inline void cpu_set_tls(CPUState *env, target_ulong newtls)
     env->unique = newtls;
 }
 #endif
+
+static inline bool cpu_has_work(CPUState *env)
+{
+    /* Here we are checking to see if the CPU should wake up from HALT.
+       We will have gotten into this state only for WTINT from PALmode.  */
+    /* ??? I'm not sure how the IPL state works with WTINT to keep a CPU
+       asleep even if (some) interrupts have been asserted.  For now,
+       assume that if a CPU really wants to stay asleep, it will mask
+       interrupts at the chipset level, which will prevent these bits
+       from being set in the first place.  */
+    return env->interrupt_request & (CPU_INTERRUPT_HARD
+                                     | CPU_INTERRUPT_TIMER
+                                     | CPU_INTERRUPT_SMP
+                                     | CPU_INTERRUPT_MCHK);
+}
+
+#include "exec-all.h"
+
+static inline void cpu_pc_from_tb(CPUState *env, TranslationBlock *tb)
+{
+    env->pc = tb->pc;
+}
 
 #endif /* !defined (__CPU_ALPHA_H__) */

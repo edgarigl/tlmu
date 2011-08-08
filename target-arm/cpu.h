@@ -133,6 +133,12 @@ typedef struct CPUARMState {
         uint32_t c7_par;  /* Translation result. */
         uint32_t c9_insn; /* Cache lockdown registers.  */
         uint32_t c9_data;
+        uint32_t c9_pmcr; /* performance monitor control register */
+        uint32_t c9_pmcnten; /* perf monitor counter enables */
+        uint32_t c9_pmovsr; /* perf monitor overflow status */
+        uint32_t c9_pmxevtyper; /* perf monitor event type */
+        uint32_t c9_pmuserenr; /* perf monitor user enable */
+        uint32_t c9_pminten; /* perf monitor interrupt enables */
         uint32_t c13_fcse; /* FCSE PID.  */
         uint32_t c13_context; /* Context ID.  */
         uint32_t c13_tls1; /* User RW Thread register.  */
@@ -221,7 +227,7 @@ typedef struct CPUARMState {
         void *opaque;
     } cp[15];
     void *nvic;
-    struct arm_boot_info *boot_info;
+    const struct arm_boot_info *boot_info;
 } CPUARMState;
 
 CPUARMState *cpu_arm_init(const char *cpu_model);
@@ -238,7 +244,7 @@ uint32_t do_arm_semihosting(CPUARMState *env);
 int cpu_arm_signal_handler(int host_signum, void *pinfo,
                            void *puc);
 int cpu_arm_handle_mmu_fault (CPUARMState *env, target_ulong address, int rw,
-                              int mmu_idx, int is_softmuu);
+                              int mmu_idx);
 #define cpu_handle_mmu_fault cpu_arm_handle_mmu_fault
 
 static inline void cpu_set_tls(CPUARMState *env, target_ulong newtls)
@@ -438,7 +444,7 @@ void cpu_arm_set_cp_io(CPUARMState *env, int cpnum,
 #define cpu_signal_handler cpu_arm_signal_handler
 #define cpu_list arm_cpu_list
 
-#define CPU_SAVE_VERSION 3
+#define CPU_SAVE_VERSION 4
 
 /* MMU modes definitions */
 #define MMU_MODE0_SUFFIX _kernel
@@ -510,6 +516,19 @@ static inline void cpu_get_tb_cpu_state(CPUState *env, target_ulong *pc,
     if (env->vfp.xregs[ARM_VFP_FPEXC] & (1 << 30)) {
         *flags |= ARM_TBFLAG_VFPEN_MASK;
     }
+}
+
+static inline bool cpu_has_work(CPUState *env)
+{
+    return env->interrupt_request &
+        (CPU_INTERRUPT_FIQ | CPU_INTERRUPT_HARD | CPU_INTERRUPT_EXITTB);
+}
+
+#include "exec-all.h"
+
+static inline void cpu_pc_from_tb(CPUState *env, TranslationBlock *tb)
+{
+    env->regs[15] = tb->pc;
 }
 
 #endif

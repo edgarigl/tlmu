@@ -657,7 +657,7 @@ static ssize_t virtio_net_receive(VLANClientState *nc, const uint8_t *buf, size_
 
         /* copy in packet.  ugh */
         len = iov_from_buf(sg, elem.in_num,
-                           buf + offset, size - offset);
+                           buf + offset, 0, size - offset);
         total += len;
         offset += len;
         /* If buffers can't be merged, at this point we
@@ -1073,6 +1073,6 @@ void virtio_net_exit(VirtIODevice *vdev)
         qemu_bh_delete(n->tx_bh);
     }
 
-    virtio_cleanup(&n->vdev);
     qemu_del_vlan_client(&n->nic->nc);
+    virtio_cleanup(&n->vdev);
 }

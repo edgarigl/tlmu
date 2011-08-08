@@ -27,6 +27,7 @@
 #include "kvm.h"
 #include "blockdev.h"
 #include "virtio-pci.h"
+#include "range.h"
 
 /* from Linux's linux/virtio_pci.h */
 
@@ -74,9 +75,6 @@
 #define VIRTIO_PCI_CONFIG(dev)          (msix_enabled(dev) ? \
                                          VIRTIO_PCI_CONFIG_MSI : \
                                          VIRTIO_PCI_CONFIG_NOMSI)
-
-/* Virtio ABI version, if we increment this, we break the guest driver. */
-#define VIRTIO_PCI_ABI_VERSION          0
 
 /* How many bits to shift physical queue address written to QUEUE_PFN.
  * 12 is historical, and due to x86 page size. */
@@ -328,7 +326,9 @@ static void virtio_ioport_write(void *opaque, uint32_t addr, uint32_t val)
             vdev->queue_sel = val;
         break;
     case VIRTIO_PCI_QUEUE_NOTIFY:
-        virtio_queue_notify(vdev, val);
+        if (val < VIRTIO_PCI_QUEUE_MAX) {
+            virtio_queue_notify(vdev, val);
+        }
         break;
     case VIRTIO_PCI_STATUS:
         if (!(val & VIRTIO_CONFIG_S_DRIVER_OK)) {
@@ -517,17 +517,16 @@ static void virtio_write_config(PCIDevice *pci_dev, uint32_t address,
 {
     VirtIOPCIProxy *proxy = DO_UPCAST(VirtIOPCIProxy, pci_dev, pci_dev);
 
-    if (PCI_COMMAND == address) {
-        if (!(val & PCI_COMMAND_MASTER)) {
-            if (!(proxy->flags & VIRTIO_PCI_FLAG_BUS_MASTER_BUG)) {
-                virtio_pci_stop_ioeventfd(proxy);
-                virtio_set_status(proxy->vdev,
-                                  proxy->vdev->status & ~VIRTIO_CONFIG_S_DRIVER_OK);
-            }
-        }
+    pci_default_write_config(pci_dev, address, val, len);
+
+    if (range_covers_byte(address, len, PCI_COMMAND) &&
+        !(pci_dev->config[PCI_COMMAND] & PCI_COMMAND_MASTER) &&
+        !(proxy->flags & VIRTIO_PCI_FLAG_BUS_MASTER_BUG)) {
+        virtio_pci_stop_ioeventfd(proxy);
+        virtio_set_status(proxy->vdev,
+                          proxy->vdev->status & ~VIRTIO_CONFIG_S_DRIVER_OK);
     }
 
-    pci_default_write_config(pci_dev, address, val, len);
     msix_write_config(pci_dev, address, val, len);
 }
 
@@ -649,9 +648,7 @@ static const VirtIOBindings virtio_pci_bindings = {
     .vmstate_change = virtio_pci_vmstate_change,
 };
 
-void virtio_init_pci(VirtIOPCIProxy *proxy, VirtIODevice *vdev,
-                            uint16_t vendor, uint16_t device,
-                            uint16_t class_code, uint8_t pif)
+void virtio_init_pci(VirtIOPCIProxy *proxy, VirtIODevice *vdev)
 {
     uint8_t *config;
     uint32_t size;
@@ -659,19 +656,12 @@ void virtio_init_pci(VirtIOPCIProxy *proxy, VirtIODevice *vdev,
     proxy->vdev = vdev;
 
     config = proxy->pci_dev.config;
-    pci_config_set_vendor_id(config, vendor);
-    pci_config_set_device_id(config, device);
 
-    config[0x08] = VIRTIO_PCI_ABI_VERSION;
-
-    config[0x09] = pif;
-    pci_config_set_class(config, class_code);
-
-    config[0x2c] = vendor & 0xFF;
-    config[0x2d] = (vendor >> 8) & 0xFF;
-    config[0x2e] = vdev->device_id & 0xFF;
-    config[0x2f] = (vdev->device_id >> 8) & 0xFF;
-
+    if (proxy->class_code) {
+        pci_config_set_class(config, proxy->class_code);
+    }
+    pci_set_word(config + 0x2c, pci_get_word(config + PCI_VENDOR_ID));
+    pci_set_word(config + 0x2e, vdev->device_id);
     config[0x3d] = 1;
 
     if (vdev->nvectors && !msix_init(&proxy->pci_dev, vdev->nvectors, 1, 0)) {
@@ -710,15 +700,13 @@ static int virtio_blk_init_pci(PCIDevice *pci_dev)
         proxy->class_code != PCI_CLASS_STORAGE_OTHER)
         proxy->class_code = PCI_CLASS_STORAGE_SCSI;
 
-    vdev = virtio_blk_init(&pci_dev->qdev, &proxy->block);
+    vdev = virtio_blk_init(&pci_dev->qdev, &proxy->block,
+                           &proxy->block_serial);
     if (!vdev) {
         return -1;
     }
     vdev->nvectors = proxy->nvectors;
-    virtio_init_pci(proxy, vdev,
-                    PCI_VENDOR_ID_REDHAT_QUMRANET,
-                    PCI_DEVICE_ID_VIRTIO_BLOCK,
-                    proxy->class_code, 0x00);
+    virtio_init_pci(proxy, vdev);
     /* make the actual value visible */
     proxy->nvectors = vdev->nvectors;
     return 0;
@@ -756,10 +744,7 @@ static int virtio_serial_init_pci(PCIDevice *pci_dev)
     vdev->nvectors = proxy->nvectors == DEV_NVECTORS_UNSPECIFIED
                                         ? proxy->serial.max_virtserial_ports + 1
                                         : proxy->nvectors;
-    virtio_init_pci(proxy, vdev,
-                    PCI_VENDOR_ID_REDHAT_QUMRANET,
-                    PCI_DEVICE_ID_VIRTIO_CONSOLE,
-                    proxy->class_code, 0x00);
+    virtio_init_pci(proxy, vdev);
     proxy->nvectors = vdev->nvectors;
     return 0;
 }
@@ -781,11 +766,7 @@ static int virtio_net_init_pci(PCIDevice *pci_dev)
     vdev = virtio_net_init(&pci_dev->qdev, &proxy->nic, &proxy->net);
 
     vdev->nvectors = proxy->nvectors;
-    virtio_init_pci(proxy, vdev,
-                    PCI_VENDOR_ID_REDHAT_QUMRANET,
-                    PCI_DEVICE_ID_VIRTIO_NET,
-                    PCI_CLASS_NETWORK_ETHERNET,
-                    0x00);
+    virtio_init_pci(proxy, vdev);
 
     /* make the actual value visible */
     proxy->nvectors = vdev->nvectors;
@@ -807,12 +788,20 @@ static int virtio_balloon_init_pci(PCIDevice *pci_dev)
     VirtIODevice *vdev;
 
     vdev = virtio_balloon_init(&pci_dev->qdev);
-    virtio_init_pci(proxy, vdev,
-                    PCI_VENDOR_ID_REDHAT_QUMRANET,
-                    PCI_DEVICE_ID_VIRTIO_BALLOON,
-                    PCI_CLASS_MEMORY_RAM,
-                    0x00);
+    if (!vdev) {
+        return -1;
+    }
+    virtio_init_pci(proxy, vdev);
     return 0;
+}
+
+static int virtio_balloon_exit_pci(PCIDevice *pci_dev)
+{
+    VirtIOPCIProxy *proxy = DO_UPCAST(VirtIOPCIProxy, pci_dev, pci_dev);
+
+    virtio_pci_stop_ioeventfd(proxy);
+    virtio_balloon_exit(proxy->vdev);
+    return virtio_exit_pci(pci_dev);
 }
 
 static PCIDeviceInfo virtio_info[] = {
@@ -822,9 +811,14 @@ static PCIDeviceInfo virtio_info[] = {
         .qdev.size = sizeof(VirtIOPCIProxy),
         .init      = virtio_blk_init_pci,
         .exit      = virtio_blk_exit_pci,
+        .vendor_id = PCI_VENDOR_ID_REDHAT_QUMRANET,
+        .device_id = PCI_DEVICE_ID_VIRTIO_BLOCK,
+        .revision  = VIRTIO_PCI_ABI_VERSION,
+        .class_id  = PCI_CLASS_STORAGE_SCSI,
         .qdev.props = (Property[]) {
             DEFINE_PROP_HEX32("class", VirtIOPCIProxy, class_code, 0),
             DEFINE_BLOCK_PROPERTIES(VirtIOPCIProxy, block),
+            DEFINE_PROP_STRING("serial", VirtIOPCIProxy, block_serial),
             DEFINE_PROP_BIT("ioeventfd", VirtIOPCIProxy, flags,
                             VIRTIO_PCI_FLAG_USE_IOEVENTFD_BIT, true),
             DEFINE_PROP_UINT32("vectors", VirtIOPCIProxy, nvectors, 2),
@@ -839,6 +833,10 @@ static PCIDeviceInfo virtio_info[] = {
         .init       = virtio_net_init_pci,
         .exit       = virtio_net_exit_pci,
         .romfile    = "pxe-virtio.rom",
+        .vendor_id  = PCI_VENDOR_ID_REDHAT_QUMRANET,
+        .device_id  = PCI_DEVICE_ID_VIRTIO_NET,
+        .revision   = VIRTIO_PCI_ABI_VERSION,
+        .class_id   = PCI_CLASS_NETWORK_ETHERNET,
         .qdev.props = (Property[]) {
             DEFINE_PROP_BIT("ioeventfd", VirtIOPCIProxy, flags,
                             VIRTIO_PCI_FLAG_USE_IOEVENTFD_BIT, false),
@@ -859,6 +857,10 @@ static PCIDeviceInfo virtio_info[] = {
         .qdev.size = sizeof(VirtIOPCIProxy),
         .init      = virtio_serial_init_pci,
         .exit      = virtio_serial_exit_pci,
+        .vendor_id = PCI_VENDOR_ID_REDHAT_QUMRANET,
+        .device_id = PCI_DEVICE_ID_VIRTIO_CONSOLE,
+        .revision  = VIRTIO_PCI_ABI_VERSION,
+        .class_id  = PCI_CLASS_COMMUNICATION_OTHER,
         .qdev.props = (Property[]) {
             DEFINE_PROP_BIT("ioeventfd", VirtIOPCIProxy, flags,
                             VIRTIO_PCI_FLAG_USE_IOEVENTFD_BIT, true),
@@ -876,7 +878,11 @@ static PCIDeviceInfo virtio_info[] = {
         .qdev.alias = "virtio-balloon",
         .qdev.size = sizeof(VirtIOPCIProxy),
         .init      = virtio_balloon_init_pci,
-        .exit      = virtio_exit_pci,
+        .exit      = virtio_balloon_exit_pci,
+        .vendor_id = PCI_VENDOR_ID_REDHAT_QUMRANET,
+        .device_id = PCI_DEVICE_ID_VIRTIO_BALLOON,
+        .revision  = VIRTIO_PCI_ABI_VERSION,
+        .class_id  = PCI_CLASS_MEMORY_RAM,
         .qdev.props = (Property[]) {
             DEFINE_VIRTIO_COMMON_FEATURES(VirtIOPCIProxy, host_features),
             DEFINE_PROP_END_OF_LIST(),

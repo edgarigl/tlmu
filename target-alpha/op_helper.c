@@ -17,11 +17,14 @@
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "exec.h"
+#include "cpu.h"
+#include "dyngen-exec.h"
 #include "host-utils.h"
 #include "softfloat.h"
 #include "helper.h"
 #include "qemu-timer.h"
+
+#define FP_STATUS (env->fp_status)
 
 /*****************************************************************************/
 /* Exceptions processing helpers */
@@ -32,7 +35,7 @@ void QEMU_NORETURN helper_excp(int excp, int error)
 {
     env->exception_index = excp;
     env->error_code = error;
-    cpu_loop_exit();
+    cpu_loop_exit(env);
 }
 
 static void do_restore_state(void *retaddr)
@@ -53,7 +56,7 @@ static void QEMU_NORETURN dynamic_excp(int excp, int error)
     env->exception_index = excp;
     env->error_code = error;
     do_restore_state(GETPC());
-    cpu_loop_exit();
+    cpu_loop_exit(env);
 }
 
 static void QEMU_NORETURN arith_excp(int exc, uint64_t mask)
@@ -1301,13 +1304,17 @@ static void QEMU_NORETURN do_unaligned_access(target_ulong addr, int is_write,
     helper_excp(EXCP_UNALIGN, 0);
 }
 
-void QEMU_NORETURN do_unassigned_access(target_phys_addr_t addr, int is_write,
-                                        int is_exec, int unused, int size)
+void QEMU_NORETURN cpu_unassigned_access(CPUState *env1,
+                                         target_phys_addr_t addr, int is_write,
+                                         int is_exec, int unused, int size)
 {
+    env = env1;
     env->trap_arg0 = addr;
     env->trap_arg1 = is_write;
     dynamic_excp(EXCP_MCHK, 0);
 }
+
+#include "softmmu_exec.h"
 
 #define MMUSUFFIX _mmu
 #define ALIGNED_ONLY
@@ -1337,11 +1344,11 @@ void tlb_fill (target_ulong addr, int is_write, int mmu_idx, void *retaddr)
        generated code */
     saved_env = env;
     env = cpu_single_env;
-    ret = cpu_alpha_handle_mmu_fault(env, addr, is_write, mmu_idx, 1);
+    ret = cpu_alpha_handle_mmu_fault(env, addr, is_write, mmu_idx);
     if (unlikely(ret != 0)) {
         do_restore_state(retaddr);
         /* Exception index and error code are already set */
-        cpu_loop_exit();
+        cpu_loop_exit(env);
     }
     env = saved_env;
 }

@@ -1,5 +1,6 @@
 #include <assert.h>
-#include "exec.h"
+#include "cpu.h"
+#include "dyngen-exec.h"
 #include "helper.h"
 #include "host-utils.h"
 
@@ -20,14 +21,14 @@
 void helper_raise_exception(uint32_t index)
 {
     env->exception_index = index;
-    cpu_loop_exit();
+    cpu_loop_exit(env);
 }
 
 void helper_hlt(void)
 {
     env->halted = 1;
     env->exception_index = EXCP_HLT;
-    cpu_loop_exit();
+    cpu_loop_exit(env);
 }
 
 void helper_wcsr_im(uint32_t im)
@@ -86,7 +87,7 @@ void tlb_fill(target_ulong addr, int is_write, int mmu_idx, void *retaddr)
     saved_env = env;
     env = cpu_single_env;
 
-    ret = cpu_lm32_handle_mmu_fault(env, addr, is_write, mmu_idx, 1);
+    ret = cpu_lm32_handle_mmu_fault(env, addr, is_write, mmu_idx);
     if (unlikely(ret)) {
         if (retaddr) {
             /* now we have a real cpu fault */
@@ -98,7 +99,7 @@ void tlb_fill(target_ulong addr, int is_write, int mmu_idx, void *retaddr)
                 cpu_restore_state(tb, env, pc);
             }
         }
-        cpu_loop_exit();
+        cpu_loop_exit(env);
     }
     env = saved_env;
 }

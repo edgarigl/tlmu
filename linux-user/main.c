@@ -29,8 +29,7 @@
 #include "qemu.h"
 #include "qemu-common.h"
 #include "cache-utils.h"
-/* For tb_lock */
-#include "exec-all.h"
+#include "cpu.h"
 #include "tcg.h"
 #include "qemu-timer.h"
 #include "envlist.h"
@@ -319,7 +318,8 @@ void cpu_loop(CPUX86State *env)
                                           env->regs[R_EDX],
                                           env->regs[R_ESI],
                                           env->regs[R_EDI],
-                                          env->regs[R_EBP]);
+                                          env->regs[R_EBP],
+                                          0, 0);
             break;
 #ifndef TARGET_ABI32
         case EXCP_SYSCALL:
@@ -331,7 +331,8 @@ void cpu_loop(CPUX86State *env)
                                           env->regs[R_EDX],
                                           env->regs[10],
                                           env->regs[8],
-                                          env->regs[9]);
+                                          env->regs[9],
+                                          0, 0);
             env->eip = env->exception_next_eip;
             break;
 #endif
@@ -735,7 +736,8 @@ void cpu_loop(CPUARMState *env)
                                                   env->regs[2],
                                                   env->regs[3],
                                                   env->regs[4],
-                                                  env->regs[5]);
+                                                  env->regs[5],
+                                                  0, 0);
                     }
                 } else {
                     goto error;
@@ -831,7 +833,8 @@ void cpu_loop(CPUState *env)
                                                   env->regs[2],
                                                   env->regs[3],
                                                   env->regs[4],
-                                                  env->regs[5]);
+                                                  env->regs[5],
+                                                  0, 0);
                     }
                 } else {
                     goto error;
@@ -1018,7 +1021,8 @@ void cpu_loop (CPUSPARCState *env)
             ret = do_syscall (env, env->gregs[1],
                               env->regwptr[0], env->regwptr[1],
                               env->regwptr[2], env->regwptr[3],
-                              env->regwptr[4], env->regwptr[5]);
+                              env->regwptr[4], env->regwptr[5],
+                              0, 0);
             if ((abi_ulong)ret >= (abi_ulong)(-515)) {
 #if defined(TARGET_SPARC64) && !defined(TARGET_ABI32)
                 env->xcc |= PSR_CARRY;
@@ -1611,7 +1615,7 @@ void cpu_loop(CPUPPCState *env)
             env->crf[0] &= ~0x1;
             ret = do_syscall(env, env->gpr[0], env->gpr[3], env->gpr[4],
                              env->gpr[5], env->gpr[6], env->gpr[7],
-                             env->gpr[8]);
+                             env->gpr[8], 0, 0);
             if (ret == (uint32_t)(-TARGET_QEMU_ESIGRETURN)) {
                 /* Returning from a successful sigreturn syscall.
                    Avoid corrupting register state.  */
@@ -1871,7 +1875,7 @@ static const uint8_t mips_syscall_args[] = {
 	MIPS_SYS(sys_getcwd	, 2)
 	MIPS_SYS(sys_capget	, 2)
 	MIPS_SYS(sys_capset	, 2)	/* 4205 */
-	MIPS_SYS(sys_sigaltstack	, 0)
+	MIPS_SYS(sys_sigaltstack	, 2)
 	MIPS_SYS(sys_sendfile	, 4)
 	MIPS_SYS(sys_ni_syscall	, 0)
 	MIPS_SYS(sys_ni_syscall	, 0)
@@ -1981,6 +1985,33 @@ static const uint8_t mips_syscall_args[] = {
 	MIPS_SYS(sys_epoll_pwait, 6)
 	MIPS_SYS(sys_ioprio_set, 3)
 	MIPS_SYS(sys_ioprio_get, 2)
+        MIPS_SYS(sys_utimensat, 4)
+        MIPS_SYS(sys_signalfd, 3)
+        MIPS_SYS(sys_ni_syscall, 0)     /* was timerfd */
+        MIPS_SYS(sys_eventfd, 1)
+        MIPS_SYS(sys_fallocate, 6)      /* 4320 */
+        MIPS_SYS(sys_timerfd_create, 2)
+        MIPS_SYS(sys_timerfd_gettime, 2)
+        MIPS_SYS(sys_timerfd_settime, 4)
+        MIPS_SYS(sys_signalfd4, 4)
+        MIPS_SYS(sys_eventfd2, 2)       /* 4325 */
+        MIPS_SYS(sys_epoll_create1, 1)
+        MIPS_SYS(sys_dup3, 3)
+        MIPS_SYS(sys_pipe2, 2)
+        MIPS_SYS(sys_inotify_init1, 1)
+        MIPS_SYS(sys_preadv, 6)         /* 4330 */
+        MIPS_SYS(sys_pwritev, 6)
+        MIPS_SYS(sys_rt_tgsigqueueinfo, 4)
+        MIPS_SYS(sys_perf_event_open, 5)
+        MIPS_SYS(sys_accept4, 4)
+        MIPS_SYS(sys_recvmmsg, 5)       /* 4335 */
+        MIPS_SYS(sys_fanotify_init, 2)
+        MIPS_SYS(sys_fanotify_mark, 6)
+        MIPS_SYS(sys_prlimit64, 4)
+        MIPS_SYS(sys_name_to_handle_at, 5)
+        MIPS_SYS(sys_open_by_handle_at, 3) /* 4340 */
+        MIPS_SYS(sys_clock_adjtime, 2)
+        MIPS_SYS(sys_syncfs, 1)
 };
 
 #undef MIPS_SYS
@@ -2049,7 +2080,7 @@ void cpu_loop(CPUMIPSState *env)
             syscall_num = env->active_tc.gpr[2] - 4000;
             env->active_tc.PC += 4;
             if (syscall_num >= sizeof(mips_syscall_args)) {
-                ret = -ENOSYS;
+                ret = -TARGET_ENOSYS;
             } else {
                 int nb_args;
                 abi_ulong sp_reg;
@@ -2072,7 +2103,7 @@ void cpu_loop(CPUMIPSState *env)
                                  env->active_tc.gpr[5],
                                  env->active_tc.gpr[6],
                                  env->active_tc.gpr[7],
-                                 arg5, arg6/*, arg7, arg8*/);
+                                 arg5, arg6, arg7, arg8);
             }
             if (ret == -TARGET_QEMU_ESIGRETURN) {
                 /* Returning from a successful sigreturn syscall.
@@ -2089,6 +2120,8 @@ void cpu_loop(CPUMIPSState *env)
             break;
         case EXCP_TLBL:
         case EXCP_TLBS:
+        case EXCP_AdEL:
+        case EXCP_AdES:
             info.si_signo = TARGET_SIGSEGV;
             info.si_errno = 0;
             /* XXX: check env->error_code */
@@ -2160,7 +2193,8 @@ void cpu_loop (CPUState *env)
                              env->gregs[6],
                              env->gregs[7],
                              env->gregs[0],
-                             env->gregs[1]);
+                             env->gregs[1],
+                             0, 0);
             env->gregs[0] = ret;
             break;
         case EXCP_INTERRUPT:
@@ -2229,7 +2263,8 @@ void cpu_loop (CPUState *env)
                              env->regs[12], 
                              env->regs[13], 
                              env->pregs[7], 
-                             env->pregs[11]);
+                             env->pregs[11],
+                             0, 0);
             env->regs[10] = ret;
             break;
         case EXCP_DEBUG:
@@ -2288,7 +2323,8 @@ void cpu_loop (CPUState *env)
                              env->regs[7], 
                              env->regs[8], 
                              env->regs[9], 
-                             env->regs[10]);
+                             env->regs[10],
+                             0, 0);
             env->regs[3] = ret;
             env->sregs[SR_PC] = env->regs[14];
             break;
@@ -2398,7 +2434,8 @@ void cpu_loop(CPUM68KState *env)
                                           env->dregs[3],
                                           env->dregs[4],
                                           env->dregs[5],
-                                          env->aregs[0]);
+                                          env->aregs[0],
+                                          0, 0);
             }
             break;
         case EXCP_INTERRUPT:
@@ -2576,7 +2613,8 @@ void cpu_loop (CPUState *env)
                 sysret = do_syscall(env, trapnr,
                                     env->ir[IR_A0], env->ir[IR_A1],
                                     env->ir[IR_A2], env->ir[IR_A3],
-                                    env->ir[IR_A4], env->ir[IR_A5]);
+                                    env->ir[IR_A4], env->ir[IR_A5],
+                                    0, 0);
                 if (trapnr == TARGET_NR_sigreturn
                     || trapnr == TARGET_NR_rt_sigreturn) {
                     break;
@@ -2707,7 +2745,8 @@ void cpu_loop(CPUS390XState *env)
                            env->regs[4],
                            env->regs[5],
                            env->regs[6],
-                           env->regs[7]);
+                           env->regs[7],
+                           0, 0);
             }
             break;
         case EXCP_ADDR:
@@ -2832,6 +2871,8 @@ int main(int argc, char **argv, char **envp)
 {
     const char *filename;
     const char *cpu_model;
+    const char *log_file = DEBUG_LOGFILE;
+    const char *log_mask = NULL;
     struct target_pt_regs regs1, *regs = &regs1;
     struct image_info info1, *info = &info1;
     struct linux_binprm bprm;
@@ -2852,9 +2893,6 @@ int main(int argc, char **argv, char **envp)
         usage();
 
     qemu_cache_utils_init(envp);
-
-    /* init debug */
-    cpu_set_log_filename(DEBUG_LOGFILE);
 
     if ((envlist = envlist_create()) == NULL) {
         (void) fprintf(stderr, "Unable to allocate envlist\n");
@@ -2894,22 +2932,15 @@ int main(int argc, char **argv, char **envp)
         if (!strcmp(r, "-")) {
             break;
         } else if (!strcmp(r, "d")) {
-            int mask;
-            const CPULogItem *item;
-
-	    if (optind >= argc)
+            if (optind >= argc) {
 		break;
-
-	    r = argv[optind++];
-            mask = cpu_str_to_log_mask(r);
-            if (!mask) {
-                printf("Log items (comma separated):\n");
-                for(item = cpu_log_items; item->mask != 0; item++) {
-                    printf("%-10s %s\n", item->name, item->help);
-                }
-                exit(1);
             }
-            cpu_set_log(mask);
+            log_mask = argv[optind++];
+        } else if (!strcmp(r, "D")) {
+            if (optind >= argc) {
+                break;
+            }
+            log_file = argv[optind++];
         } else if (!strcmp(r, "E")) {
             r = argv[optind++];
             if (envlist_setenv(envlist, r) != 0)
@@ -3017,8 +3048,26 @@ int main(int argc, char **argv, char **envp)
             usage();
         }
     }
-    if (optind >= argc)
+    /* init debug */
+    cpu_set_log_filename(log_file);
+    if (log_mask) {
+        int mask;
+        const CPULogItem *item;
+
+        mask = cpu_str_to_log_mask(log_mask);
+        if (!mask) {
+            printf("Log items (comma separated):\n");
+            for (item = cpu_log_items; item->mask != 0; item++) {
+                printf("%-10s %s\n", item->name, item->help);
+            }
+            exit(1);
+        }
+        cpu_set_log(mask);
+    }
+
+    if (optind >= argc) {
         usage();
+    }
     filename = argv[optind];
     exec_path = argv[optind];
 
@@ -3068,7 +3117,8 @@ int main(int argc, char **argv, char **envp)
         cpu_model = "any";
 #endif
     }
-    cpu_exec_init_all(0);
+    tcg_exec_init(0);
+    cpu_exec_init_all();
     /* NOTE: we need to init the CPU at this stage to get
        qemu_host_page_size */
     env = cpu_init(cpu_model);

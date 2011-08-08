@@ -24,7 +24,6 @@
 #include <signal.h>
 
 #include "cpu.h"
-#include "exec-all.h"
 
 enum {
     TLBRET_DIRTY = -4,
@@ -267,7 +266,7 @@ target_phys_addr_t cpu_get_phys_page_debug(CPUState *env, target_ulong addr)
 #endif
 
 int cpu_mips_handle_mmu_fault (CPUState *env, target_ulong address, int rw,
-                               int mmu_idx, int is_softmmu)
+                               int mmu_idx)
 {
 #if !defined(CONFIG_USER_ONLY)
     target_phys_addr_t physical;
@@ -279,8 +278,8 @@ int cpu_mips_handle_mmu_fault (CPUState *env, target_ulong address, int rw,
 #if 0
     log_cpu_state(env, 0);
 #endif
-    qemu_log("%s pc " TARGET_FMT_lx " ad " TARGET_FMT_lx " rw %d mmu_idx %d smmu %d\n",
-              __func__, env->active_tc.PC, address, rw, mmu_idx, is_softmmu);
+    qemu_log("%s pc " TARGET_FMT_lx " ad " TARGET_FMT_lx " rw %d mmu_idx %d\n",
+              __func__, env->active_tc.PC, address, rw, mmu_idx);
 
     rw &= 1;
 

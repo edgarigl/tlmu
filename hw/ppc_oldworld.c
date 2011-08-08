@@ -43,6 +43,7 @@
 #include "kvm.h"
 #include "kvm_ppc.h"
 #include "blockdev.h"
+#include "exec-memory.h"
 
 #define MAX_IDE_BUS 2
 #define CFG_ADDR 0xf0000510
@@ -59,6 +60,11 @@ static uint64_t translate_kernel_address(void *opaque, uint64_t addr)
     return (addr & 0x0fffffff) + KERNEL_LOAD_ADDR;
 }
 
+static target_phys_addr_t round_page(target_phys_addr_t addr)
+{
+    return (addr + TARGET_PAGE_SIZE - 1) & TARGET_PAGE_MASK;
+}
+
 static void ppc_heathrow_init (ram_addr_t ram_size,
                                const char *boot_device,
                                const char *kernel_filename,
@@ -71,7 +77,7 @@ static void ppc_heathrow_init (ram_addr_t ram_size,
     qemu_irq *pic, **heathrow_irqs;
     int linux_boot, i;
     ram_addr_t ram_offset, bios_offset;
-    uint32_t kernel_base, initrd_base;
+    uint32_t kernel_base, initrd_base, cmdline_base = 0;
     int32_t kernel_size, initrd_size;
     PCIBus *pci_bus;
     MacIONVRAMState *nvr;
@@ -157,7 +163,7 @@ static void ppc_heathrow_init (ram_addr_t ram_size,
         }
         /* load initrd */
         if (initrd_filename) {
-            initrd_base = INITRD_LOAD_ADDR;
+            initrd_base = round_page(kernel_base + kernel_size + KERNEL_GAP);
             initrd_size = load_image_targphys(initrd_filename, initrd_base,
                                               ram_size - initrd_base);
             if (initrd_size < 0) {
@@ -165,9 +171,11 @@ static void ppc_heathrow_init (ram_addr_t ram_size,
                          initrd_filename);
                 exit(1);
             }
+            cmdline_base = round_page(initrd_base + initrd_size);
         } else {
             initrd_base = 0;
             initrd_size = 0;
+            cmdline_base = round_page(kernel_base + kernel_size + KERNEL_GAP);
         }
         ppc_boot_device = 'm';
     } else {
@@ -226,7 +234,7 @@ static void ppc_heathrow_init (ram_addr_t ram_size,
         hw_error("Only 6xx bus is supported on heathrow machine\n");
     }
     pic = heathrow_pic_init(&pic_mem_index, 1, heathrow_irqs);
-    pci_bus = pci_grackle_init(0xfec00000, pic);
+    pci_bus = pci_grackle_init(0xfec00000, pic, get_system_memory());
     pci_vga_init(pci_bus);
 
     escc_mem_index = escc_init(0x80013000, pic[0x0f], pic[0x10], serial_hds[0],
@@ -278,8 +286,8 @@ static void ppc_heathrow_init (ram_addr_t ram_size,
     fw_cfg_add_i32(fw_cfg, FW_CFG_KERNEL_ADDR, kernel_base);
     fw_cfg_add_i32(fw_cfg, FW_CFG_KERNEL_SIZE, kernel_size);
     if (kernel_cmdline) {
-        fw_cfg_add_i32(fw_cfg, FW_CFG_KERNEL_CMDLINE, CMDLINE_ADDR);
-        pstrcpy_targphys("cmdline", CMDLINE_ADDR, TARGET_PAGE_SIZE, kernel_cmdline);
+        fw_cfg_add_i32(fw_cfg, FW_CFG_KERNEL_CMDLINE, cmdline_base);
+        pstrcpy_targphys("cmdline", cmdline_base, TARGET_PAGE_SIZE, kernel_cmdline);
     } else {
         fw_cfg_add_i32(fw_cfg, FW_CFG_KERNEL_CMDLINE, 0);
     }

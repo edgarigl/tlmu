@@ -9,29 +9,43 @@
 #ifndef XEN_MAPCACHE_H
 #define XEN_MAPCACHE_H
 
-#include <sys/mman.h>
-#include "trace.h"
+#include <stdlib.h>
 
-void     qemu_map_cache_init(void);
-uint8_t  *qemu_map_cache(target_phys_addr_t phys_addr, target_phys_addr_t size, uint8_t lock);
-void     qemu_map_cache_unlock(void *phys_addr);
-ram_addr_t qemu_ram_addr_from_mapcache(void *ptr);
-void     qemu_invalidate_entry(uint8_t *buffer);
-void     qemu_invalidate_map_cache(void);
+#ifdef CONFIG_XEN
 
-uint8_t *xen_map_block(target_phys_addr_t phys_addr, target_phys_addr_t size);
+void xen_map_cache_init(void);
+uint8_t *xen_map_cache(target_phys_addr_t phys_addr, target_phys_addr_t size,
+                       uint8_t lock);
+ram_addr_t xen_ram_addr_from_mapcache(void *ptr);
+void xen_invalidate_map_cache_entry(uint8_t *buffer);
+void xen_invalidate_map_cache(void);
 
-static inline void xen_unmap_block(void *addr, ram_addr_t size)
+#else
+
+static inline void xen_map_cache_init(void)
 {
-    trace_xen_unmap_block(addr, size);
-
-    if (munmap(addr, size) != 0) {
-        hw_error("xen_unmap_block: %s", strerror(errno));
-    }
 }
 
+static inline uint8_t *xen_map_cache(target_phys_addr_t phys_addr,
+                                     target_phys_addr_t size,
+                                     uint8_t lock)
+{
+    abort();
+}
 
-#define mapcache_lock()   ((void)0)
-#define mapcache_unlock() ((void)0)
+static inline ram_addr_t xen_ram_addr_from_mapcache(void *ptr)
+{
+    abort();
+}
+
+static inline void xen_invalidate_map_cache_entry(uint8_t *buffer)
+{
+}
+
+static inline void xen_invalidate_map_cache(void)
+{
+}
+
+#endif
 
 #endif /* !XEN_MAPCACHE_H */

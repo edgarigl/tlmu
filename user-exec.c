@@ -17,7 +17,8 @@
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
 #include "config.h"
-#include "exec.h"
+#include "cpu.h"
+#include "dyngen-exec.h"
 #include "disas.h"
 #include "tcg.h"
 
@@ -37,13 +38,14 @@
 
 //#define DEBUG_SIGNAL
 
+static void exception_action(CPUState *env1)
+{
 #if defined(TARGET_I386)
-#define EXCEPTION_ACTION                                        \
-    raise_exception_err(env->exception_index, env->error_code)
+    raise_exception_err_env(env1, env1->exception_index, env1->error_code);
 #else
-#define EXCEPTION_ACTION                                        \
-    cpu_loop_exit()
+    cpu_loop_exit(env1);
 #endif
+}
 
 /* exit the current TB from a signal handler. The host registers are
    restored in a state compatible with the CPU emulator
@@ -100,7 +102,7 @@ static inline int handle_cpu_signal(unsigned long pc, unsigned long address,
     }
 
     /* see if it is an MMU fault */
-    ret = cpu_handle_mmu_fault(env, address, is_write, MMU_USER_IDX, 0);
+    ret = cpu_handle_mmu_fault(env, address, is_write, MMU_USER_IDX);
     if (ret < 0) {
         return 0; /* not an MMU fault */
     }
@@ -118,7 +120,7 @@ static inline int handle_cpu_signal(unsigned long pc, unsigned long address,
     /* we restore the process signal mask as the sigreturn should
        do it (XXX: use sigsetjmp) */
     sigprocmask(SIG_SETMASK, old_set, NULL);
-    EXCEPTION_ACTION;
+    exception_action(env);
 
     /* never comes here */
     return 1;
@@ -627,47 +629,3 @@ int cpu_signal_handler(int host_signum, void *pinfo,
 #error host CPU specific signal handler needed
 
 #endif
-
-#if defined(TARGET_I386)
-
-void cpu_x86_load_seg(CPUX86State *s, int seg_reg, int selector)
-{
-    CPUX86State *saved_env;
-
-    saved_env = env;
-    env = s;
-    if (!(env->cr[0] & CR0_PE_MASK) || (env->eflags & VM_MASK)) {
-        selector &= 0xffff;
-        cpu_x86_load_seg_cache(env, seg_reg, selector,
-                               (selector << 4), 0xffff, 0);
-    } else {
-        helper_load_seg(seg_reg, selector);
-    }
-    env = saved_env;
-}
-
-void cpu_x86_fsave(CPUX86State *s, target_ulong ptr, int data32)
-{
-    CPUX86State *saved_env;
-
-    saved_env = env;
-    env = s;
-
-    helper_fsave(ptr, data32);
-
-    env = saved_env;
-}
-
-void cpu_x86_frstor(CPUX86State *s, target_ulong ptr, int data32)
-{
-    CPUX86State *saved_env;
-
-    saved_env = env;
-    env = s;
-
-    helper_frstor(ptr, data32);
-
-    env = saved_env;
-}
-
-#endif /* TARGET_I386 */

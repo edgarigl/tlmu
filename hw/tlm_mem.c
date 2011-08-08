@@ -93,7 +93,7 @@ void tlm_bus_access_dbg(int rw, uint64_t addr, void *data, int len)
 int tlm_get_dmi_ptr(struct tlmu_dmi *dmi)
 {
     target_phys_addr_t addr;
-    int len;
+    int64_t len;
 
     assert(dmi);
     addr = dmi->base;
@@ -414,7 +414,6 @@ static void map_ram(struct TLMRegisterRamEntry *ram)
 }
 
 /* Used by exec-all when mapping in pages for code fetching.  */
-int tlm_iodev_is_ram(int iodev);
 int tlm_iodev_is_ram(int iodev) {
     struct TLMRegisterRamEntry *ram;
 

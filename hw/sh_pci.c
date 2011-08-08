@@ -26,6 +26,7 @@
 #include "pci.h"
 #include "pci_host.h"
 #include "bswap.h"
+#include "exec-memory.h"
 
 typedef struct SHPCIState {
     SysBusDevice busdev;
@@ -127,7 +128,8 @@ static int sh_pci_init_device(SysBusDevice *dev)
     }
     s->bus = pci_register_bus(&s->busdev.qdev, "pci",
                               sh_pci_set_irq, sh_pci_map_irq,
-                              s->irq, PCI_DEVFN(0, 0), 4);
+                              s->irq, get_system_memory(),
+                              PCI_DEVFN(0, 0), 4);
     s->memconfig = cpu_register_io_memory(sh_pci_reg.r, sh_pci_reg.w,
                                           s, DEVICE_NATIVE_ENDIAN);
     sysbus_init_mmio_cb(dev, 0x224, sh_pci_map);
@@ -137,8 +139,6 @@ static int sh_pci_init_device(SysBusDevice *dev)
 
 static int sh_pci_host_init(PCIDevice *d)
 {
-    pci_config_set_vendor_id(d->config, PCI_VENDOR_ID_HITACHI);
-    pci_config_set_device_id(d->config, PCI_DEVICE_ID_HITACHI_SH7751R);
     pci_set_word(d->config + PCI_COMMAND, PCI_COMMAND_WAIT);
     pci_set_word(d->config + PCI_STATUS, PCI_STATUS_CAP_LIST |
                  PCI_STATUS_FAST_BACK | PCI_STATUS_DEVSEL_MEDIUM);
@@ -149,6 +149,8 @@ static PCIDeviceInfo sh_pci_host_info = {
     .qdev.name = "sh_pci_host",
     .qdev.size = sizeof(PCIDevice),
     .init      = sh_pci_host_init,
+    .vendor_id = PCI_VENDOR_ID_HITACHI,
+    .device_id = PCI_DEVICE_ID_HITACHI_SH7751R,
 };
 
 static void sh_pci_register_devices(void)

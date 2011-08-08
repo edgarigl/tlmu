@@ -36,6 +36,7 @@ static bool qdev_hot_removed = false;
 
 /* This is a nasty hack to allow passing a NULL bus to qdev_create.  */
 static BusState *main_system_bus;
+static void main_system_bus_create(void);
 
 DeviceInfo *device_info_list;
 
@@ -289,6 +290,9 @@ int qdev_init(DeviceState *dev)
                                        dev->alias_required_for_version);
     }
     dev->state = DEV_STATE_INITIALIZED;
+    if (dev->hotplugged && dev->info->reset) {
+        dev->info->reset(dev);
+    }
     return 0;
 }
 
@@ -325,8 +329,7 @@ static int qdev_reset_one(DeviceState *dev, void *opaque)
 BusState *sysbus_get_default(void)
 {
     if (!main_system_bus) {
-        main_system_bus = qbus_create(&system_bus_info, NULL,
-                                      "main-system-bus");
+        main_system_bus_create();
     }
     return main_system_bus;
 }
@@ -371,7 +374,7 @@ void qdev_init_nofail(DeviceState *dev)
     DeviceInfo *info = dev->info;
 
     if (qdev_init(dev) < 0) {
-        error_report("Initialization of device %s failed\n", info->name);
+        error_report("Initialization of device %s failed", info->name);
         exit(1);
     }
 }
@@ -459,7 +462,7 @@ void qdev_connect_gpio_out(DeviceState * dev, int n, qemu_irq pin)
 
 void qdev_set_nic_properties(DeviceState *dev, NICInfo *nd)
 {
-    qdev_prop_set_macaddr(dev, "mac", nd->macaddr);
+    qdev_prop_set_macaddr(dev, "mac", nd->macaddr.a);
     if (nd->vlan)
         qdev_prop_set_vlan(dev, "vlan", nd->vlan);
     if (nd->netdev)
@@ -468,6 +471,7 @@ void qdev_set_nic_properties(DeviceState *dev, NICInfo *nd)
         qdev_prop_exists(dev, "vectors")) {
         qdev_prop_set_uint32(dev, "vectors", nd->nvectors);
     }
+    nd->instantiated = 1;
 }
 
 BusState *qdev_get_child_bus(DeviceState *dev, const char *name)
@@ -778,6 +782,16 @@ BusState *qbus_create(BusInfo *info, DeviceState *parent, const char *name)
     bus->qdev_allocated = 1;
     qbus_create_inplace(bus, info, parent, name);
     return bus;
+}
+
+static void main_system_bus_create(void)
+{
+    /* assign main_system_bus before qbus_create_inplace()
+     * in order to make "if (bus != main_system_bus)" work */
+    main_system_bus = qemu_mallocz(system_bus_info.size);
+    main_system_bus->qdev_allocated = 1;
+    qbus_create_inplace(main_system_bus, &system_bus_info, NULL,
+                        "main-system-bus");
 }
 
 void qbus_free(BusState *bus)

@@ -840,7 +840,7 @@ ETEXI
 
     {
         .name       = "snapshot_blkdev",
-        .args_type  = "device:B,snapshot_file:s?,format:s?",
+        .args_type  = "device:B,snapshot-file:s?,format:s?",
         .params     = "device [new-image-file] [format]",
         .help       = "initiates a live snapshot\n\t\t\t"
                       "of device. If a new image file is specified, the\n\t\t\t"
@@ -1311,8 +1311,6 @@ show virtual to physical memory mappings (i386, SH4 and SPARC only)
 show the active virtual memory mappings (i386 only)
 @item info jit
 show dynamic compiler info
-@item info kvm
-show KVM information
 @item info numa
 show NUMA information
 @item info kvm

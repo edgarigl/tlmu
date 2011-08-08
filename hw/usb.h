@@ -26,6 +26,12 @@
 #include "qdev.h"
 #include "qemu-queue.h"
 
+/* Constants related to the USB / PCI interaction */
+#define USB_SBRN    0x60 /* Serial Bus Release Number Register */
+#define USB_RELEASE_1  0x10 /* USB 1.0 */
+#define USB_RELEASE_2  0x20 /* USB 2.0 */
+#define USB_RELEASE_3  0x30 /* USB 3.0 */
+
 #define USB_TOKEN_SETUP 0x2d
 #define USB_TOKEN_IN    0x69 /* device -> host */
 #define USB_TOKEN_OUT   0xe1 /* host -> device */
@@ -124,6 +130,7 @@
 #define USB_DT_ENDPOINT			0x05
 #define USB_DT_DEVICE_QUALIFIER         0x06
 #define USB_DT_OTHER_SPEED_CONFIG       0x07
+#define USB_DT_DEBUG                    0x0A
 #define USB_DT_INTERFACE_ASSOC          0x0B
 
 #define USB_ENDPOINT_XFER_CONTROL	0
@@ -132,6 +139,7 @@
 #define USB_ENDPOINT_XFER_INT		3
 
 typedef struct USBBus USBBus;
+typedef struct USBBusOps USBBusOps;
 typedef struct USBPort USBPort;
 typedef struct USBDevice USBDevice;
 typedef struct USBDeviceInfo USBDeviceInfo;
@@ -161,7 +169,10 @@ struct USBDevice {
     char *port_path;
     void *opaque;
 
+    /* Actual connected speed */
     int speed;
+    /* Supported speeds, not in info because it may be variable (hostdevs) */
+    int speedmask;
     uint8_t addr;
     char product_desc[32];
     int auto_attach;
@@ -241,8 +252,18 @@ struct USBDeviceInfo {
 typedef struct USBPortOps {
     void (*attach)(USBPort *port);
     void (*detach)(USBPort *port);
-    void (*wakeup)(USBDevice *dev);
-    void (*complete)(USBDevice *dev, USBPacket *p);
+    /*
+     * This gets called when a device downstream from the device attached to
+     * the port (iow attached through a hub) gets detached.
+     */
+    void (*child_detach)(USBPort *port, USBDevice *child);
+    void (*wakeup)(USBPort *port);
+    /*
+     * Note that port->dev will be different then the device from which
+     * the packet originated when a hub is involved, if you want the orginating
+     * device use p->owner
+     */
+    void (*complete)(USBPort *port, USBPacket *p);
 } USBPortOps;
 
 /* USB port on which a device can be connected */
@@ -264,11 +285,20 @@ struct USBPacket {
     int pid;
     uint8_t devaddr;
     uint8_t devep;
-    uint8_t *data;
-    int len;
+    QEMUIOVector iov;
+    int result; /* transfer length or USB_RET_* status code */
     /* Internal use by the USB layer.  */
     USBDevice *owner;
 };
+
+void usb_packet_init(USBPacket *p);
+void usb_packet_setup(USBPacket *p, int pid, uint8_t addr, uint8_t ep);
+void usb_packet_addbuf(USBPacket *p, void *ptr, size_t len);
+int usb_packet_map(USBPacket *p, QEMUSGList *sgl);
+void usb_packet_unmap(USBPacket *p);
+void usb_packet_copy(USBPacket *p, void *ptr, size_t bytes);
+void usb_packet_skip(USBPacket *p, size_t bytes);
+void usb_packet_cleanup(USBPacket *p);
 
 int usb_handle_packet(USBDevice *dev, USBPacket *p);
 void usb_packet_complete(USBDevice *dev, USBPacket *p);
@@ -323,6 +353,7 @@ void musb_set_size(MUSBState *s, int epnum, int size, int is_tx);
 
 struct USBBus {
     BusState qbus;
+    USBBusOps *ops;
     int busnr;
     int nfree;
     int nused;
@@ -331,7 +362,12 @@ struct USBBus {
     QTAILQ_ENTRY(USBBus) next;
 };
 
-void usb_bus_new(USBBus *bus, DeviceState *host);
+struct USBBusOps {
+    int (*register_companion)(USBBus *bus, USBPort *ports[],
+                              uint32_t portcount, uint32_t firstport);
+};
+
+void usb_bus_new(USBBus *bus, USBBusOps *ops, DeviceState *host);
 USBBus *usb_bus_find(int busnr);
 void usb_qdev_register(USBDeviceInfo *info);
 void usb_qdev_register_many(USBDeviceInfo *info);
@@ -340,6 +376,9 @@ USBDevice *usb_create_simple(USBBus *bus, const char *name);
 USBDevice *usbdevice_create(const char *cmdline);
 void usb_register_port(USBBus *bus, USBPort *port, void *opaque, int index,
                        USBPortOps *ops, int speedmask);
+int usb_register_companion(const char *masterbus, USBPort *ports[],
+                           uint32_t portcount, uint32_t firstport,
+                           void *opaque, USBPortOps *ops, int speedmask);
 void usb_port_location(USBPort *downstream, USBPort *upstream, int portnr);
 void usb_unregister_port(USBBus *bus, USBPort *port);
 int usb_device_attach(USBDevice *dev);

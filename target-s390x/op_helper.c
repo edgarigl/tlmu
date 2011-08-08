@@ -18,16 +18,21 @@
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "exec.h"
+#include "cpu.h"
+#include "dyngen-exec.h"
 #include "host-utils.h"
 #include "helpers.h"
 #include <string.h>
 #include "kvm.h"
 #include "qemu-timer.h"
+#ifdef CONFIG_KVM
+#include <linux/kvm.h>
+#endif
 
 /*****************************************************************************/
 /* Softmmu support */
 #if !defined (CONFIG_USER_ONLY)
+#include "softmmu_exec.h"
 
 #define MMUSUFFIX _mmu
 
@@ -58,7 +63,7 @@ void tlb_fill (target_ulong addr, int is_write, int mmu_idx, void *retaddr)
        generated code */
     saved_env = env;
     env = cpu_single_env;
-    ret = cpu_s390x_handle_mmu_fault(env, addr, is_write, mmu_idx, 1);
+    ret = cpu_s390x_handle_mmu_fault(env, addr, is_write, mmu_idx);
     if (unlikely(ret != 0)) {
         if (likely(retaddr)) {
             /* now we have a real cpu fault */
@@ -70,7 +75,7 @@ void tlb_fill (target_ulong addr, int is_write, int mmu_idx, void *retaddr)
                 cpu_restore_state(tb, env, pc);
             }
         }
-        cpu_loop_exit();
+        cpu_loop_exit(env);
     }
     env = saved_env;
 }
@@ -89,7 +94,7 @@ void HELPER(exception)(uint32_t excp)
 {
     HELPER_LOG("%s: exception %d\n", __FUNCTION__, excp);
     env->exception_index = excp;
-    cpu_loop_exit();
+    cpu_loop_exit(env);
 }
 
 #ifndef CONFIG_USER_ONLY
@@ -2323,7 +2328,7 @@ void HELPER(tr)(uint32_t len, uint64_t array, uint64_t trans)
 void HELPER(load_psw)(uint64_t mask, uint64_t addr)
 {
     load_psw(env, mask, addr);
-    cpu_loop_exit();
+    cpu_loop_exit(env);
 }
 
 static void program_interrupt(CPUState *env, uint32_t code, int ilc)
@@ -2331,12 +2336,14 @@ static void program_interrupt(CPUState *env, uint32_t code, int ilc)
     qemu_log("program interrupt at %#" PRIx64 "\n", env->psw.addr);
 
     if (kvm_enabled()) {
+#ifdef CONFIG_KVM
         kvm_s390_interrupt(env, KVM_S390_PROGRAM_INT, code);
+#endif
     } else {
         env->int_pgm_code = code;
         env->int_pgm_ilc = ilc;
         env->exception_index = EXCP_PGM;
-        cpu_loop_exit();
+        cpu_loop_exit(env);
     }
 }
 
@@ -2823,12 +2830,12 @@ static uint32_t mvc_asc(int64_t l, uint64_t a1, uint64_t mode1, uint64_t a2,
     }
 
     if (mmu_translate(env, a1 & TARGET_PAGE_MASK, 1, mode1, &dest, &flags)) {
-        cpu_loop_exit();
+        cpu_loop_exit(env);
     }
     dest |= a1 & ~TARGET_PAGE_MASK;
 
     if (mmu_translate(env, a2 & TARGET_PAGE_MASK, 0, mode2, &src, &flags)) {
-        cpu_loop_exit();
+        cpu_loop_exit(env);
     }
     src |= a2 & ~TARGET_PAGE_MASK;
 

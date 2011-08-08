@@ -324,6 +324,7 @@ typedef struct VMStateSubsection {
 
 struct VMStateDescription {
     const char *name;
+    int unmigratable;
     int version_id;
     int minimum_version_id;
     int minimum_version_id_old;
@@ -779,6 +780,9 @@ extern const VMStateDescription vmstate_ptimer;
 
 #define VMSTATE_INT32_LE(_f, _s)                                   \
     VMSTATE_SINGLE(_f, _s, 0, vmstate_info_int32_le, int32_t)
+
+#define VMSTATE_UINT8_TEST(_f, _s, _t)                               \
+    VMSTATE_SINGLE_TEST(_f, _s, _t, 0, vmstate_info_uint8, uint8_t)
 
 #define VMSTATE_UINT16_TEST(_f, _s, _t)                               \
     VMSTATE_SINGLE_TEST(_f, _s, _t, 0, vmstate_info_uint16, uint16_t)

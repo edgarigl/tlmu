@@ -26,10 +26,26 @@
  * THE SOFTWARE.
  */
 
+/* The following block of code temporarily renames the daemon() function so the
+   compiler does not see the warning associated with it in stdlib.h on OSX */
+#ifdef __APPLE__
+#define daemon qemu_fake_daemon_function
+#include <stdlib.h>
+#undef daemon
+extern int daemon(int, int);
+#endif
+
 #include "config-host.h"
 #include "sysemu.h"
 #include "trace.h"
 #include "qemu_socket.h"
+
+
+
+int qemu_daemon(int nochdir, int noclose)
+{
+    return daemon(nochdir, noclose);
+}
 
 void *qemu_oom_check(void *ptr)
 {
@@ -63,7 +79,10 @@ void *qemu_memalign(size_t alignment, size_t size)
 /* alloc shared memory pages */
 void *qemu_vmalloc(size_t size)
 {
-    return qemu_memalign(getpagesize(), size);
+    void *ptr;
+    ptr = qemu_memalign(getpagesize(), size);
+    trace_qemu_vmalloc(size, ptr);
+    return ptr;
 }
 
 void qemu_vfree(void *ptr)

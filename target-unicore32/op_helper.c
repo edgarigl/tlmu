@@ -7,7 +7,8 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
-#include "exec.h"
+#include "cpu.h"
+#include "dyngen-exec.h"
 #include "helper.h"
 
 #define SIGNBIT (uint32_t)0x80000000
@@ -16,7 +17,7 @@
 void HELPER(exception)(uint32_t excp)
 {
     env->exception_index = excp;
-    cpu_loop_exit();
+    cpu_loop_exit(env);
 }
 
 static target_ulong asr_read(void)

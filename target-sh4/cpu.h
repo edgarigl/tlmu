@@ -194,7 +194,7 @@ int cpu_sh4_exec(CPUSH4State * s);
 int cpu_sh4_signal_handler(int host_signum, void *pinfo,
                            void *puc);
 int cpu_sh4_handle_mmu_fault(CPUSH4State * env, target_ulong address, int rw,
-			     int mmu_idx, int is_softmmu);
+                             int mmu_idx);
 #define cpu_handle_mmu_fault cpu_sh4_handle_mmu_fault
 void do_interrupt(CPUSH4State * env);
 
@@ -359,6 +359,19 @@ static inline void cpu_get_tb_cpu_state(CPUState *env, target_ulong *pc,
             | (env->sr & (SR_MD | SR_RB))                      /* Bits 29-30 */
             | (env->sr & SR_FD)                                /* Bit 15 */
             | (env->movcal_backup ? TB_FLAG_PENDING_MOVCA : 0); /* Bit 4 */
+}
+
+static inline bool cpu_has_work(CPUState *env)
+{
+    return env->interrupt_request & CPU_INTERRUPT_HARD;
+}
+
+#include "exec-all.h"
+
+static inline void cpu_pc_from_tb(CPUState *env, TranslationBlock *tb)
+{
+    env->pc = tb->pc;
+    env->flags = tb->flags;
 }
 
 #endif				/* _CPU_SH4_H */

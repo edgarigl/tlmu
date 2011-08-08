@@ -12,7 +12,7 @@
  *  2009-Oct-13 Artyom Tarasenko : implemented the block descriptor in the
  *                                 MODE SENSE response.
  *
- * This code is licenced under the LGPL.
+ * This code is licensed under the LGPL.
  *
  * Note that this file only handles the SCSI architecture model and device
  * commands.  Emulation of interface/link layer protocols is handled by
@@ -59,8 +59,6 @@ typedef struct SCSIDiskReq {
     uint32_t status;
 } SCSIDiskReq;
 
-typedef enum { SCSI_HD, SCSI_CD } SCSIDriveKind;
-
 struct SCSIDiskState
 {
     SCSIDevice qdev;
@@ -74,20 +72,19 @@ struct SCSIDiskState
     char *version;
     char *serial;
     SCSISense sense;
-    SCSIDriveKind drive_kind;
 };
 
 static int scsi_handle_rw_error(SCSIDiskReq *r, int error, int type);
 static int scsi_disk_emulate_command(SCSIDiskReq *r, uint8_t *outbuf);
 
 static SCSIRequest *scsi_new_request(SCSIDevice *d, uint32_t tag,
-        uint32_t lun)
+                                     uint32_t lun, void *hba_private)
 {
     SCSIDiskState *s = DO_UPCAST(SCSIDiskState, qdev, d);
     SCSIRequest *req;
     SCSIDiskReq *r;
 
-    req = scsi_req_alloc(sizeof(SCSIDiskReq), &s->qdev, tag, lun);
+    req = scsi_req_alloc(sizeof(SCSIDiskReq), &s->qdev, tag, lun, hba_private);
     r = DO_UPCAST(SCSIDiskReq, req, req);
     r->iov.iov_base = qemu_blockalign(s->bs, SCSI_DMA_BUF_SIZE);
     return req;
@@ -382,7 +379,7 @@ static int scsi_disk_emulate_inquiry(SCSIRequest *req, uint8_t *outbuf)
             return -1;
         }
 
-        if (s->drive_kind == SCSI_CD) {
+        if (s->qdev.type == TYPE_ROM) {
             outbuf[buflen++] = 5;
         } else {
             outbuf[buflen++] = 0;
@@ -398,9 +395,10 @@ static int scsi_disk_emulate_inquiry(SCSIRequest *req, uint8_t *outbuf)
                     "buffer size %zd\n", req->cmd.xfer);
             pages = buflen++;
             outbuf[buflen++] = 0x00; // list of supported pages (this page)
-            outbuf[buflen++] = 0x80; // unit serial number
+            if (s->serial)
+                outbuf[buflen++] = 0x80; // unit serial number
             outbuf[buflen++] = 0x83; // device identification
-            if (s->drive_kind == SCSI_HD) {
+            if (s->qdev.type == TYPE_DISK) {
                 outbuf[buflen++] = 0xb0; // block limits
                 outbuf[buflen++] = 0xb2; // thin provisioning
             }
@@ -409,8 +407,14 @@ static int scsi_disk_emulate_inquiry(SCSIRequest *req, uint8_t *outbuf)
         }
         case 0x80: /* Device serial number, optional */
         {
-            int l = strlen(s->serial);
+            int l;
 
+            if (!s->serial) {
+                DPRINTF("Inquiry (EVPD[Serial number] not supported\n");
+                return -1;
+            }
+
+            l = strlen(s->serial);
             if (l > req->cmd.xfer)
                 l = req->cmd.xfer;
             if (l > 20)
@@ -453,7 +457,7 @@ static int scsi_disk_emulate_inquiry(SCSIRequest *req, uint8_t *outbuf)
             unsigned int opt_io_size =
                     s->qdev.conf.opt_io_size / s->qdev.blocksize;
 
-            if (s->drive_kind == SCSI_CD) {
+            if (s->qdev.type == TYPE_ROM) {
                 DPRINTF("Inquiry (EVPD[%02X] not supported for CDROM\n",
                         page_code);
                 return -1;
@@ -519,16 +523,15 @@ static int scsi_disk_emulate_inquiry(SCSIRequest *req, uint8_t *outbuf)
     memset(outbuf, 0, buflen);
 
     if (req->lun) {
-        outbuf[0] = 0x7f;	/* LUN not supported */
+        outbuf[0] = 0x7f;       /* LUN not supported */
         return buflen;
     }
 
-    if (s->drive_kind == SCSI_CD) {
-        outbuf[0] = 5;
+    outbuf[0] = s->qdev.type & 0x1f;
+    if (s->qdev.type == TYPE_ROM) {
         outbuf[1] = 0x80;
         memcpy(&outbuf[16], "QEMU CD-ROM     ", 16);
     } else {
-        outbuf[0] = 0;
         outbuf[1] = s->removable ? 0x80 : 0;
         memcpy(&outbuf[16], "QEMU HARDDISK   ", 16);
     }
@@ -654,7 +657,7 @@ static int mode_sense_page(SCSIRequest *req, int page, uint8_t *p,
         return p[1] + 2;
 
     case 0x2a: /* CD Capabilities and Mechanical Status page. */
-        if (s->drive_kind != SCSI_CD)
+        if (s->qdev.type != TYPE_ROM)
             return 0;
         p[0] = 0x2a;
         p[1] = 0x14;
@@ -829,7 +832,7 @@ static int scsi_disk_emulate_command(SCSIDiskReq *r, uint8_t *outbuf)
     case TEST_UNIT_READY:
         if (!bdrv_is_inserted(s->bs))
             goto not_ready;
-	break;
+        break;
     case REQUEST_SENSE:
         if (req->cmd.xfer < 4)
             goto illegal_request;
@@ -841,7 +844,7 @@ static int scsi_disk_emulate_command(SCSIDiskReq *r, uint8_t *outbuf)
         buflen = scsi_disk_emulate_inquiry(req, outbuf);
         if (buflen < 0)
             goto illegal_request;
-	break;
+        break;
     case MODE_SENSE:
     case MODE_SENSE_10:
         buflen = scsi_disk_emulate_mode_sense(req, outbuf);
@@ -870,18 +873,18 @@ static int scsi_disk_emulate_command(SCSIDiskReq *r, uint8_t *outbuf)
             goto illegal_request;
         break;
     case START_STOP:
-        if (s->drive_kind == SCSI_CD && (req->cmd.buf[4] & 2)) {
+        if (s->qdev.type == TYPE_ROM && (req->cmd.buf[4] & 2)) {
             /* load/eject medium */
             bdrv_eject(s->bs, !(req->cmd.buf[4] & 1));
         }
-	break;
+        break;
     case ALLOW_MEDIUM_REMOVAL:
         bdrv_set_locked(s->bs, req->cmd.buf[4] & 1);
-	break;
-    case READ_CAPACITY:
+        break;
+    case READ_CAPACITY_10:
         /* The normal LEN field for this command is zero.  */
-	memset(outbuf, 0, 8);
-	bdrv_get_geometry(s->bs, &nb_sectors);
+        memset(outbuf, 0, 8);
+        bdrv_get_geometry(s->bs, &nb_sectors);
         if (!nb_sectors)
             goto not_ready;
         nb_sectors /= s->cluster_size;
@@ -901,7 +904,7 @@ static int scsi_disk_emulate_command(SCSIDiskReq *r, uint8_t *outbuf)
         outbuf[6] = s->cluster_size * 2;
         outbuf[7] = 0;
         buflen = 8;
-	break;
+        break;
     case SYNCHRONIZE_CACHE:
         ret = bdrv_flush(s->bs);
         if (ret < 0) {
@@ -963,13 +966,7 @@ static int scsi_disk_emulate_command(SCSIDiskReq *r, uint8_t *outbuf)
         outbuf[3] = 8;
         buflen = 16;
         break;
-    case VERIFY:
-        break;
-    case REZERO_UNIT:
-        DPRINTF("Rezero Unit\n");
-        if (!bdrv_is_inserted(s->bs)) {
-            goto not_ready;
-        }
+    case VERIFY_10:
         break;
     default:
         scsi_command_complete(r, CHECK_CONDITION, SENSE_CODE(INVALID_OPCODE));
@@ -1007,7 +1004,7 @@ static int32_t scsi_send_command(SCSIRequest *req, uint8_t *buf)
 
     command = buf[0];
     outbuf = (uint8_t *)r->iov.iov_base;
-    DPRINTF("Command: lun=%d tag=0x%x data=0x%02x", lun, tag, buf[0]);
+    DPRINTF("Command: lun=%d tag=0x%x data=0x%02x", req->lun, req->tag, buf[0]);
 
     if (scsi_req_parse(&r->req, buf) != 0) {
         BADF("Unsupported command length, command %x\n", command);
@@ -1045,14 +1042,13 @@ static int32_t scsi_send_command(SCSIRequest *req, uint8_t *buf)
     case RELEASE_10:
     case START_STOP:
     case ALLOW_MEDIUM_REMOVAL:
-    case READ_CAPACITY:
+    case READ_CAPACITY_10:
     case SYNCHRONIZE_CACHE:
     case READ_TOC:
     case GET_CONFIGURATION:
     case SERVICE_ACTION_IN:
     case REPORT_LUNS:
-    case VERIFY:
-    case REZERO_UNIT:
+    case VERIFY_10:
         rc = scsi_disk_emulate_command(r, outbuf);
         if (rc < 0) {
             return 0;
@@ -1075,7 +1071,7 @@ static int32_t scsi_send_command(SCSIRequest *req, uint8_t *buf)
     case WRITE_10:
     case WRITE_12:
     case WRITE_16:
-    case WRITE_VERIFY:
+    case WRITE_VERIFY_10:
     case WRITE_VERIFY_12:
     case WRITE_VERIFY_16:
         len = r->req.cmd.xfer / s->qdev.blocksize;
@@ -1183,7 +1179,7 @@ static void scsi_destroy(SCSIDevice *dev)
     blockdev_mark_auto_del(s->qdev.conf.bs);
 }
 
-static int scsi_initfn(SCSIDevice *dev, SCSIDriveKind kind)
+static int scsi_initfn(SCSIDevice *dev, uint8_t scsi_type)
 {
     SCSIDiskState *s = DO_UPCAST(SCSIDiskState, qdev, dev);
     DriveInfo *dinfo;
@@ -1193,9 +1189,8 @@ static int scsi_initfn(SCSIDevice *dev, SCSIDriveKind kind)
         return -1;
     }
     s->bs = s->qdev.conf.bs;
-    s->drive_kind = kind;
 
-    if (kind == SCSI_HD && !bdrv_is_inserted(s->bs)) {
+    if (scsi_type == TYPE_DISK && !bdrv_is_inserted(s->bs)) {
         error_report("Device needs media, but drive is empty");
         return -1;
     }
@@ -1203,7 +1198,9 @@ static int scsi_initfn(SCSIDevice *dev, SCSIDriveKind kind)
     if (!s->serial) {
         /* try to fall back to value set with legacy -drive serial=... */
         dinfo = drive_get_by_blockdev(s->bs);
-        s->serial = qemu_strdup(*dinfo->serial ? dinfo->serial : "0");
+        if (*dinfo->serial) {
+            s->serial = qemu_strdup(dinfo->serial);
+        }
     }
 
     if (!s->version) {
@@ -1215,44 +1212,47 @@ static int scsi_initfn(SCSIDevice *dev, SCSIDriveKind kind)
         return -1;
     }
 
-    if (kind == SCSI_CD) {
+    if (scsi_type == TYPE_ROM) {
         s->qdev.blocksize = 2048;
-    } else {
+    } else if (scsi_type == TYPE_DISK) {
         s->qdev.blocksize = s->qdev.conf.logical_block_size;
+    } else {
+        error_report("scsi-disk: Unhandled SCSI type %02x", scsi_type);
+        return -1;
     }
     s->cluster_size = s->qdev.blocksize / 512;
     s->bs->buffer_alignment = s->qdev.blocksize;
 
-    s->qdev.type = TYPE_DISK;
+    s->qdev.type = scsi_type;
     qemu_add_vm_change_state_handler(scsi_dma_restart_cb, s);
-    bdrv_set_removable(s->bs, kind == SCSI_CD);
+    bdrv_set_removable(s->bs, scsi_type == TYPE_ROM);
     add_boot_device_path(s->qdev.conf.bootindex, &dev->qdev, ",0");
     return 0;
 }
 
 static int scsi_hd_initfn(SCSIDevice *dev)
 {
-    return scsi_initfn(dev, SCSI_HD);
+    return scsi_initfn(dev, TYPE_DISK);
 }
 
 static int scsi_cd_initfn(SCSIDevice *dev)
 {
-    return scsi_initfn(dev, SCSI_CD);
+    return scsi_initfn(dev, TYPE_ROM);
 }
 
 static int scsi_disk_initfn(SCSIDevice *dev)
 {
-    SCSIDriveKind kind;
     DriveInfo *dinfo;
+    uint8_t scsi_type;
 
     if (!dev->conf.bs) {
-        kind = SCSI_HD;         /* will die in scsi_initfn() */
+        scsi_type = TYPE_DISK;  /* will die in scsi_initfn() */
     } else {
         dinfo = drive_get_by_blockdev(dev->conf.bs);
-        kind = dinfo->media_cd ? SCSI_CD : SCSI_HD;
+        scsi_type = dinfo->media_cd ? TYPE_ROM : TYPE_DISK;
     }
 
-    return scsi_initfn(dev, kind);
+    return scsi_initfn(dev, scsi_type);
 }
 
 #define DEFINE_SCSI_DISK_PROPERTIES()                           \

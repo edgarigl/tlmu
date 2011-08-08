@@ -23,7 +23,6 @@
 
 #include "config.h"
 #include "cpu.h"
-#include "exec-all.h"
 #include "host-utils.h"
 
 #define D(x)
@@ -38,7 +37,7 @@ void do_interrupt (CPUState *env)
 }
 
 int cpu_mb_handle_mmu_fault(CPUState * env, target_ulong address, int rw,
-                             int mmu_idx, int is_softmmu)
+                            int mmu_idx)
 {
     env->exception_index = 0xaa;
     cpu_dump_state(env, stderr, fprintf, 0);
@@ -48,7 +47,7 @@ int cpu_mb_handle_mmu_fault(CPUState * env, target_ulong address, int rw,
 #else /* !CONFIG_USER_ONLY */
 
 int cpu_mb_handle_mmu_fault (CPUState *env, target_ulong address, int rw,
-                               int mmu_idx, int is_softmmu)
+                             int mmu_idx)
 {
     unsigned int hit;
     unsigned int mmu_available;

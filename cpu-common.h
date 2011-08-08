@@ -3,10 +3,6 @@
 
 /* CPU interfaces that are target indpendent.  */
 
-#if defined(__arm__) || defined(__sparc__) || defined(__mips__) || defined(__hppa__) || defined(__ia64__)
-#define WORDS_ALIGNED
-#endif
-
 #ifdef TARGET_PHYS_ADDR_BITS
 #include "targphys.h"
 #endif
@@ -27,7 +23,15 @@ enum device_endian {
 };
 
 /* address in the RAM (different from a physical address) */
+#if defined(CONFIG_XEN_BACKEND) && TARGET_PHYS_ADDR_BITS == 64
+typedef uint64_t ram_addr_t;
+#  define RAM_ADDR_MAX UINT64_MAX
+#  define RAM_ADDR_FMT "%" PRIx64
+#else
 typedef unsigned long ram_addr_t;
+#  define RAM_ADDR_MAX ULONG_MAX
+#  define RAM_ADDR_FMT "%lx"
+#endif
 
 typedef struct TLM_RAMBlock {
     int iodev;
@@ -79,9 +83,11 @@ void qemu_ram_remap(ram_addr_t addr, ram_addr_t length);
 /* This should only be used for ram local to a device.  */
 void *qemu_get_ram_ptr(ram_addr_t addr);
 void *qemu_get_ram_base_ptr(ram_addr_t addr);
+// ED FIXME: Replace with qemu_ram_ptr_length.
 int qemu_get_ram_len(ram_addr_t addr);
-void *qemu_map_paddr_to_host(target_phys_addr_t *paddr_p, int *len);
+void *qemu_map_paddr_to_host(target_phys_addr_t *paddr_p, int64_t *len);
 TLM_RAMBlock *qemu_get_ram_tlmblock(ram_addr_t addr);
+void *qemu_ram_ptr_length(ram_addr_t addr, ram_addr_t *size);
 /* Same but slower, to use for migration, where the order of
  * RAMBlocks must not change. */
 void *qemu_safe_ram_ptr(ram_addr_t addr);
@@ -152,15 +158,30 @@ void qemu_unregister_coalesced_mmio(target_phys_addr_t addr, ram_addr_t size);
 void qemu_flush_coalesced_mmio_buffer(void);
 
 uint32_t ldub_phys(target_phys_addr_t addr);
+uint32_t lduw_le_phys(target_phys_addr_t addr);
+uint32_t lduw_be_phys(target_phys_addr_t addr);
+uint32_t ldl_le_phys(target_phys_addr_t addr);
+uint32_t ldl_be_phys(target_phys_addr_t addr);
+uint64_t ldq_le_phys(target_phys_addr_t addr);
+uint64_t ldq_be_phys(target_phys_addr_t addr);
+void stb_phys(target_phys_addr_t addr, uint32_t val);
+void stw_le_phys(target_phys_addr_t addr, uint32_t val);
+void stw_be_phys(target_phys_addr_t addr, uint32_t val);
+void stl_le_phys(target_phys_addr_t addr, uint32_t val);
+void stl_be_phys(target_phys_addr_t addr, uint32_t val);
+void stq_le_phys(target_phys_addr_t addr, uint64_t val);
+void stq_be_phys(target_phys_addr_t addr, uint64_t val);
+
+#ifdef NEED_CPU_H
 uint32_t lduw_phys(target_phys_addr_t addr);
 uint32_t ldl_phys(target_phys_addr_t addr);
 uint64_t ldq_phys(target_phys_addr_t addr);
 void stl_phys_notdirty(target_phys_addr_t addr, uint32_t val);
 void stq_phys_notdirty(target_phys_addr_t addr, uint64_t val);
-void stb_phys(target_phys_addr_t addr, uint32_t val);
 void stw_phys(target_phys_addr_t addr, uint32_t val);
 void stl_phys(target_phys_addr_t addr, uint32_t val);
 void stq_phys(target_phys_addr_t addr, uint64_t val);
+#endif
 
 void cpu_physical_memory_write_rom(target_phys_addr_t addr,
                                    const uint8_t *buf, int len);

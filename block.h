@@ -4,6 +4,7 @@
 #include "qemu-aio.h"
 #include "qemu-common.h"
 #include "qemu-option.h"
+#include "qemu-coroutine.h"
 #include "qobject.h"
 
 /* block.c */
@@ -85,10 +86,13 @@ int bdrv_pwrite(BlockDriverState *bs, int64_t offset,
                 const void *buf, int count);
 int bdrv_pwrite_sync(BlockDriverState *bs, int64_t offset,
     const void *buf, int count);
-int bdrv_write_sync(BlockDriverState *bs, int64_t sector_num,
-    const uint8_t *buf, int nb_sectors);
+int coroutine_fn bdrv_co_readv(BlockDriverState *bs, int64_t sector_num,
+    int nb_sectors, QEMUIOVector *qiov);
+int coroutine_fn bdrv_co_writev(BlockDriverState *bs, int64_t sector_num,
+    int nb_sectors, QEMUIOVector *qiov);
 int bdrv_truncate(BlockDriverState *bs, int64_t offset);
 int64_t bdrv_getlength(BlockDriverState *bs);
+int64_t bdrv_get_allocated_file_size(BlockDriverState *bs);
 void bdrv_get_geometry(BlockDriverState *bs, uint64_t *nb_sectors_ptr);
 void bdrv_guess_geometry(BlockDriverState *bs, int *pcyls, int *pheads, int *psecs);
 int bdrv_commit(BlockDriverState *bs);
@@ -110,7 +114,7 @@ int bdrv_check(BlockDriverState *bs, BdrvCheckResult *res);
 typedef struct BlockDriverAIOCB BlockDriverAIOCB;
 typedef void BlockDriverCompletionFunc(void *opaque, int ret);
 typedef void BlockDriverDirtyHandler(BlockDriverState *bs, int64_t sector,
-				     int sector_num);
+                                     int sector_num);
 BlockDriverAIOCB *bdrv_aio_readv(BlockDriverState *bs, int64_t sector_num,
                                  QEMUIOVector *iov, int nb_sectors,
                                  BlockDriverCompletionFunc *cb, void *opaque);
@@ -118,7 +122,7 @@ BlockDriverAIOCB *bdrv_aio_writev(BlockDriverState *bs, int64_t sector_num,
                                   QEMUIOVector *iov, int nb_sectors,
                                   BlockDriverCompletionFunc *cb, void *opaque);
 BlockDriverAIOCB *bdrv_aio_flush(BlockDriverState *bs,
-				 BlockDriverCompletionFunc *cb, void *opaque);
+                                 BlockDriverCompletionFunc *cb, void *opaque);
 void bdrv_aio_cancel(BlockDriverAIOCB *acb);
 
 typedef struct BlockRequest {
@@ -150,7 +154,7 @@ void bdrv_close_all(void);
 int bdrv_discard(BlockDriverState *bs, int64_t sector_num, int nb_sectors);
 int bdrv_has_zero_init(BlockDriverState *bs);
 int bdrv_is_allocated(BlockDriverState *bs, int64_t sector_num, int nb_sectors,
-	int *pnum);
+                      int *pnum);
 
 #define BIOS_ATA_TRANSLATION_AUTO   0
 #define BIOS_ATA_TRANSLATION_NONE   1

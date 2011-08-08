@@ -31,6 +31,10 @@ static struct BusInfo ide_bus_info = {
     .name  = "IDE",
     .size  = sizeof(IDEBus),
     .get_fw_dev_path = idebus_get_fw_dev_path,
+    .props = (Property[]) {
+        DEFINE_PROP_UINT32("unit", IDEDevice, unit, -1),
+        DEFINE_PROP_END_OF_LIST(),
+    },
 };
 
 void ide_bus_new(IDEBus *idebus, DeviceState *dev, int bus_id)
@@ -125,6 +129,11 @@ static int ide_dev_initfn(IDEDevice *dev, IDEDriveKind kind)
     const char *serial;
     DriveInfo *dinfo;
 
+    if (dev->conf.discard_granularity && dev->conf.discard_granularity != 512) {
+        error_report("discard_granularity must be 512 for ide");
+        return -1;
+    }
+
     serial = dev->serial;
     if (!serial) {
         /* try to fall back to value set with legacy -drive serial=... */
@@ -169,7 +178,6 @@ static int ide_drive_initfn(IDEDevice *dev)
 }
 
 #define DEFINE_IDE_DEV_PROPERTIES()                     \
-    DEFINE_PROP_UINT32("unit", IDEDrive, dev.unit, -1), \
     DEFINE_BLOCK_PROPERTIES(IDEDrive, dev.conf),        \
     DEFINE_PROP_STRING("ver",  IDEDrive, dev.version),  \
     DEFINE_PROP_STRING("serial",  IDEDrive, dev.serial)

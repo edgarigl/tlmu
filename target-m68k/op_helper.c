@@ -16,19 +16,26 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
-#include "exec.h"
+#include "cpu.h"
+#include "dyngen-exec.h"
 #include "helpers.h"
 
 #if defined(CONFIG_USER_ONLY)
 
-void do_interrupt(int is_hw)
+void do_interrupt(CPUState *env1)
 {
-    env->exception_index = -1;
+    env1->exception_index = -1;
+}
+
+void do_interrupt_m68k_hardirq(CPUState *env1)
+{
 }
 
 #else
 
 extern int semihosting_enabled;
+
+#include "softmmu_exec.h"
 
 #define MMUSUFFIX _mmu
 
@@ -59,7 +66,7 @@ void tlb_fill (target_ulong addr, int is_write, int mmu_idx, void *retaddr)
        generated code */
     saved_env = env;
     env = cpu_single_env;
-    ret = cpu_m68k_handle_mmu_fault(env, addr, is_write, mmu_idx, 1);
+    ret = cpu_m68k_handle_mmu_fault(env, addr, is_write, mmu_idx);
     if (unlikely(ret)) {
         if (retaddr) {
             /* now we have a real cpu fault */
@@ -71,7 +78,7 @@ void tlb_fill (target_ulong addr, int is_write, int mmu_idx, void *retaddr)
                 cpu_restore_state(tb, env, pc);
             }
         }
-        cpu_loop_exit();
+        cpu_loop_exit(env);
     }
     env = saved_env;
 }
@@ -90,7 +97,7 @@ static void do_rte(void)
     env->aregs[7] = sp + 8;
 }
 
-void do_interrupt(int is_hw)
+static void do_interrupt_all(int is_hw)
 {
     uint32_t sp;
     uint32_t fmt;
@@ -118,7 +125,7 @@ void do_interrupt(int is_hw)
             }
             env->halted = 1;
             env->exception_index = EXCP_HLT;
-            cpu_loop_exit();
+            cpu_loop_exit(env);
             return;
         }
         if (env->exception_index >= EXCP_TRAP0
@@ -155,12 +162,31 @@ void do_interrupt(int is_hw)
     env->pc = ldl_kernel(env->vbr + vector);
 }
 
+void do_interrupt(CPUState *env1)
+{
+    CPUState *saved_env;
+
+    saved_env = env;
+    env = env1;
+    do_interrupt_all(0);
+    env = saved_env;
+}
+
+void do_interrupt_m68k_hardirq(CPUState *env1)
+{
+    CPUState *saved_env;
+
+    saved_env = env;
+    env = env1;
+    do_interrupt_all(1);
+    env = saved_env;
+}
 #endif
 
 static void raise_exception(int tt)
 {
     env->exception_index = tt;
-    cpu_loop_exit();
+    cpu_loop_exit(env);
 }
 
 void HELPER(raise_exception)(uint32_t tt)

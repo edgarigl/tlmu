@@ -23,7 +23,6 @@
 #include <inttypes.h>
 
 #include "cpu.h"
-#include "exec-all.h"
 #include "qemu-common.h"
 #include "kvm.h"
 #ifndef CONFIG_USER_ONLY
@@ -547,7 +546,7 @@ void cpu_x86_update_cr4(CPUX86State *env, uint32_t new_cr4)
 #if defined(CONFIG_USER_ONLY)
 
 int cpu_x86_handle_mmu_fault(CPUX86State *env, target_ulong addr,
-                             int is_write, int mmu_idx, int is_softmmu)
+                             int is_write, int mmu_idx)
 {
     /* user mode only emulation */
     is_write &= 1;
@@ -574,7 +573,7 @@ int cpu_x86_handle_mmu_fault(CPUX86State *env, target_ulong addr,
    1  = generate PF fault
 */
 int cpu_x86_handle_mmu_fault(CPUX86State *env, target_ulong addr,
-                             int is_write1, int mmu_idx, int is_softmmu)
+                             int is_write1, int mmu_idx)
 {
     uint64_t ptep, pte;
     target_ulong pde_addr, pte_addr;
@@ -1028,8 +1027,6 @@ int check_hw_breakpoints(CPUState *env, int force_dr6_update)
 
 static CPUDebugExcpHandler *prev_debug_excp_handler;
 
-void raise_exception_env(int exception_index, CPUState *env);
-
 static void breakpoint_handler(CPUState *env)
 {
     CPUBreakpoint *bp;
@@ -1246,8 +1243,8 @@ CPUX86State *cpu_x86_init(const char *cpu_model)
     cpu_exec_init(env);
     env->cpu_model_str = cpu_model;
 
-    /* init various static tables */
-    if (!inited) {
+    /* init various static tables used in TCG mode */
+    if (tcg_enabled() && !inited) {
         inited = 1;
         optimize_flags_init();
 #ifndef CONFIG_USER_ONLY

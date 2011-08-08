@@ -16,17 +16,20 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
-#include "exec.h"
+#include "cpu.h"
+#include "dyngen-exec.h"
 #include "helper.h"
 
 #define SIGNBIT (uint32_t)0x80000000
 #define SIGNBIT64 ((uint64_t)1 << 63)
 
-void raise_exception(int tt)
+#if !defined(CONFIG_USER_ONLY)
+static void raise_exception(int tt)
 {
     env->exception_index = tt;
-    cpu_loop_exit();
+    cpu_loop_exit(env);
 }
+#endif
 
 uint32_t HELPER(neon_tbl)(uint32_t ireg, uint32_t def,
                           uint32_t rn, uint32_t maxindex)
@@ -51,6 +54,8 @@ uint32_t HELPER(neon_tbl)(uint32_t ireg, uint32_t def,
 }
 
 #if !defined(CONFIG_USER_ONLY)
+
+#include "softmmu_exec.h"
 
 #define MMUSUFFIX _mmu
 
@@ -81,7 +86,7 @@ void tlb_fill (target_ulong addr, int is_write, int mmu_idx, void *retaddr)
        generated code */
     saved_env = env;
     env = cpu_single_env;
-    ret = cpu_arm_handle_mmu_fault(env, addr, is_write, mmu_idx, 1);
+    ret = cpu_arm_handle_mmu_fault(env, addr, is_write, mmu_idx);
     if (unlikely(ret)) {
         if (retaddr) {
             /* now we have a real cpu fault */
@@ -234,13 +239,13 @@ void HELPER(wfi)(void)
 {
     env->exception_index = EXCP_HLT;
     env->halted = 1;
-    cpu_loop_exit();
+    cpu_loop_exit(env);
 }
 
 void HELPER(exception)(uint32_t excp)
 {
     env->exception_index = excp;
-    cpu_loop_exit();
+    cpu_loop_exit(env);
 }
 
 uint32_t HELPER(cpsr_read)(void)

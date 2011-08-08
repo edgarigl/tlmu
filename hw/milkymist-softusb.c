@@ -131,7 +131,7 @@ static inline void softusb_read_dmem(MilkymistSoftUsbState *s,
 {
     if (offset + len >= s->dmem_size) {
         error_report("milkymist_softusb: read dmem out of bounds "
-                "at offset 0x%x, len %d\n", offset, len);
+                "at offset 0x%x, len %d", offset, len);
         return;
     }
 
@@ -143,7 +143,7 @@ static inline void softusb_write_dmem(MilkymistSoftUsbState *s,
 {
     if (offset + len >= s->dmem_size) {
         error_report("milkymist_softusb: write dmem out of bounds "
-                "at offset 0x%x, len %d\n", offset, len);
+                "at offset 0x%x, len %d", offset, len);
         return;
     }
 
@@ -155,7 +155,7 @@ static inline void softusb_read_pmem(MilkymistSoftUsbState *s,
 {
     if (offset + len >= s->pmem_size) {
         error_report("milkymist_softusb: read pmem out of bounds "
-                "at offset 0x%x, len %d\n", offset, len);
+                "at offset 0x%x, len %d", offset, len);
         return;
     }
 
@@ -167,7 +167,7 @@ static inline void softusb_write_pmem(MilkymistSoftUsbState *s,
 {
     if (offset + len >= s->pmem_size) {
         error_report("milkymist_softusb: write pmem out of bounds "
-                "at offset 0x%x, len %d\n", offset, len);
+                "at offset 0x%x, len %d", offset, len);
         return;
     }
 
@@ -234,11 +234,11 @@ static void softusb_usbdev_datain(void *opaque)
 
     USBPacket p;
 
-    p.pid = USB_TOKEN_IN;
-    p.devep = 1;
-    p.data = s->kbd_usb_buffer;
-    p.len = sizeof(s->kbd_usb_buffer);
+    usb_packet_init(&p);
+    usb_packet_setup(&p, USB_TOKEN_IN, 0, 1);
+    usb_packet_addbuf(&p, s->kbd_usb_buffer, sizeof(s->kbd_usb_buffer));
     s->usbdev->info->handle_data(s->usbdev, &p);
+    usb_packet_cleanup(&p);
 
     softusb_kbd_changed(s);
 }
@@ -247,8 +247,21 @@ static void softusb_attach(USBPort *port)
 {
 }
 
+static void softusb_detach(USBPort *port)
+{
+}
+
+static void softusb_child_detach(USBPort *port, USBDevice *child)
+{
+}
+
 static USBPortOps softusb_ops = {
     .attach = softusb_attach,
+    .detach = softusb_detach,
+    .child_detach = softusb_child_detach,
+};
+
+static USBBusOps softusb_bus_ops = {
 };
 
 static void milkymist_softusb_reset(DeviceState *d)
@@ -294,13 +307,15 @@ static int milkymist_softusb_init(SysBusDevice *dev)
     qemu_add_mouse_event_handler(softusb_mouse_event, s, 0, "Milkymist Mouse");
 
     /* create our usb bus */
-    usb_bus_new(&s->usbbus, NULL);
+    usb_bus_new(&s->usbbus, &softusb_bus_ops, NULL);
 
     /* our two ports */
+    /* FIXME: claim to support full speed devices. qemu mouse and keyboard
+     * report themselves as full speed devices. */
     usb_register_port(&s->usbbus, &s->usbport[0], NULL, 0, &softusb_ops,
-            USB_SPEED_MASK_LOW);
+            USB_SPEED_MASK_LOW | USB_SPEED_MASK_FULL);
     usb_register_port(&s->usbbus, &s->usbport[1], NULL, 1, &softusb_ops,
-            USB_SPEED_MASK_LOW);
+            USB_SPEED_MASK_LOW | USB_SPEED_MASK_FULL);
 
     /* and finally create an usb keyboard */
     s->usbdev = usb_create_simple(&s->usbbus, "usb-kbd");

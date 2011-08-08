@@ -19,6 +19,7 @@
 #include "monitor.h"
 #include "qemu-queue.h"
 #include "sysbus.h"
+#include "trace.h"
 #include "virtio-serial.h"
 
 /* The virtio-serial bus on top of which the ports will ride as devices */
@@ -103,7 +104,7 @@ static size_t write_to_port(VirtIOSerialPort *port,
         }
 
         len = iov_from_buf(elem.in_sg, elem.in_num,
-                           buf + offset, size - offset);
+                           buf + offset, 0, size - offset);
         offset += len;
 
         virtqueue_push(vq, &elem, len);
@@ -221,6 +222,7 @@ static size_t send_control_event(VirtIOSerialPort *port, uint16_t event,
     stw_p(&cpkt.event, event);
     stw_p(&cpkt.value, value);
 
+    trace_virtio_serial_send_control_event(port->id, event, value);
     return send_control_msg(port, &cpkt, sizeof(cpkt));
 }
 
@@ -302,6 +304,7 @@ void virtio_serial_throttle_port(VirtIOSerialPort *port, bool throttle)
         return;
     }
 
+    trace_virtio_serial_throttle_port(port->id, throttle);
     port->throttled = throttle;
     if (throttle) {
         return;
@@ -328,18 +331,13 @@ static void handle_control_message(VirtIOSerial *vser, void *buf, size_t len)
     cpkt.event = lduw_p(&gcpkt->event);
     cpkt.value = lduw_p(&gcpkt->value);
 
-    port = find_port_by_id(vser, ldl_p(&gcpkt->id));
-    if (!port && cpkt.event != VIRTIO_CONSOLE_DEVICE_READY)
-        return;
+    trace_virtio_serial_handle_control_message(cpkt.event, cpkt.value);
 
-    info = DO_UPCAST(VirtIOSerialPortInfo, qdev, port->dev.info);
-
-    switch(cpkt.event) {
-    case VIRTIO_CONSOLE_DEVICE_READY:
+    if (cpkt.event == VIRTIO_CONSOLE_DEVICE_READY) {
         if (!cpkt.value) {
-            error_report("virtio-serial-bus: Guest failure in adding device %s\n",
+            error_report("virtio-serial-bus: Guest failure in adding device %s",
                          vser->bus.qbus.name);
-            break;
+            return;
         }
         /*
          * The device is up, we can now tell the device about all the
@@ -348,11 +346,24 @@ static void handle_control_message(VirtIOSerial *vser, void *buf, size_t len)
         QTAILQ_FOREACH(port, &vser->ports, next) {
             send_control_event(port, VIRTIO_CONSOLE_PORT_ADD, 1);
         }
-        break;
+        return;
+    }
 
+    port = find_port_by_id(vser, ldl_p(&gcpkt->id));
+    if (!port) {
+        error_report("virtio-serial-bus: Unexpected port id %u for device %s",
+                     ldl_p(&gcpkt->id), vser->bus.qbus.name);
+        return;
+    }
+
+    trace_virtio_serial_handle_control_message_port(port->id);
+
+    info = DO_UPCAST(VirtIOSerialPortInfo, qdev, port->dev.info);
+
+    switch(cpkt.event) {
     case VIRTIO_CONSOLE_PORT_READY:
         if (!cpkt.value) {
-            error_report("virtio-serial-bus: Guest failure in adding port %u for device %s\n",
+            error_report("virtio-serial-bus: Guest failure in adding port %u for device %s",
                          port->id, vser->bus.qbus.name);
             break;
         }
@@ -657,20 +668,22 @@ static struct BusInfo virtser_bus_info = {
     .name      = "virtio-serial-bus",
     .size      = sizeof(VirtIOSerialBus),
     .print_dev = virtser_bus_dev_print,
+    .props      = (Property[]) {
+        DEFINE_PROP_UINT32("nr", VirtIOSerialPort, id, VIRTIO_CONSOLE_BAD_ID),
+        DEFINE_PROP_STRING("name", VirtIOSerialPort, name),
+        DEFINE_PROP_END_OF_LIST()
+    }
 };
 
 static void virtser_bus_dev_print(Monitor *mon, DeviceState *qdev, int indent)
 {
     VirtIOSerialPort *port = DO_UPCAST(VirtIOSerialPort, dev, qdev);
 
-    monitor_printf(mon, "%*s dev-prop-int: id: %u\n",
-                   indent, "", port->id);
-    monitor_printf(mon, "%*s dev-prop-int: guest_connected: %d\n",
-                   indent, "", port->guest_connected);
-    monitor_printf(mon, "%*s dev-prop-int: host_connected: %d\n",
-                   indent, "", port->host_connected);
-    monitor_printf(mon, "%*s dev-prop-int: throttled: %d\n",
-                   indent, "", port->throttled);
+    monitor_printf(mon, "%*sport %d, guest %s, host %s, throttle %s\n",
+                   indent, "", port->id,
+                   port->guest_connected ? "on" : "off",
+                   port->host_connected ? "on" : "off",
+                   port->throttled ? "on" : "off");
 }
 
 /* This function is only used if a port id is not provided by the user */
@@ -741,7 +754,7 @@ static int virtser_port_qdev_init(DeviceState *qdev, DeviceInfo *base)
     plugging_port0 = info->is_console && !find_port_by_id(port->vser, 0);
 
     if (find_port_by_id(port->vser, port->id)) {
-        error_report("virtio-serial-bus: A port already exists at id %u\n",
+        error_report("virtio-serial-bus: A port already exists at id %u",
                      port->id);
         return -1;
     }
@@ -752,7 +765,7 @@ static int virtser_port_qdev_init(DeviceState *qdev, DeviceInfo *base)
         } else {
             port->id = find_free_port_id(port->vser);
             if (port->id == VIRTIO_CONSOLE_BAD_ID) {
-                error_report("virtio-serial-bus: Maximum port limit for this device reached\n");
+                error_report("virtio-serial-bus: Maximum port limit for this device reached");
                 return -1;
             }
         }
@@ -760,7 +773,7 @@ static int virtser_port_qdev_init(DeviceState *qdev, DeviceInfo *base)
 
     max_nr_ports = tswap32(port->vser->config.max_nr_ports);
     if (port->id >= max_nr_ports) {
-        error_report("virtio-serial-bus: Out-of-range port id specified, max. allowed: %u\n",
+        error_report("virtio-serial-bus: Out-of-range port id specified, max. allowed: %u",
                      max_nr_ports - 1);
         return -1;
     }

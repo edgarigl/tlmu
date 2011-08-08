@@ -76,7 +76,7 @@ static void net_socket_send(void *opaque)
     uint8_t buf1[4096];
     const uint8_t *buf;
 
-    size = recv(s->fd, (void *)buf1, sizeof(buf1), 0);
+    size = qemu_recv(s->fd, buf1, sizeof(buf1), 0);
     if (size < 0) {
         err = socket_error();
         if (err != EWOULDBLOCK)
@@ -138,7 +138,7 @@ static void net_socket_send_dgram(void *opaque)
     NetSocketState *s = opaque;
     int size;
 
-    size = recv(s->fd, (void *)s->buf, sizeof(s->buf), 0);
+    size = qemu_recv(s->fd, s->buf, sizeof(s->buf), 0);
     if (size < 0)
         return;
     if (size == 0) {
@@ -154,6 +154,12 @@ static int net_socket_mcast_create(struct sockaddr_in *mcastaddr, struct in_addr
     struct ip_mreq imr;
     int fd;
     int val, ret;
+#ifdef __OpenBSD__
+    unsigned char loop;
+#else
+    int loop;
+#endif
+
     if (!IN_MULTICAST(ntohl(mcastaddr->sin_addr.s_addr))) {
 	fprintf(stderr, "qemu: error: specified mcastaddr \"%s\" (0x%08x) does not contain a multicast address\n",
 		inet_ntoa(mcastaddr->sin_addr),
@@ -197,9 +203,9 @@ static int net_socket_mcast_create(struct sockaddr_in *mcastaddr, struct in_addr
     }
 
     /* Force mcast msgs to loopback (eg. several QEMUs in same host */
-    val = 1;
+    loop = 1;
     ret=setsockopt(fd, IPPROTO_IP, IP_MULTICAST_LOOP,
-                   (const char *)&val, sizeof(val));
+                   (const char *)&loop, sizeof(loop));
     if (ret < 0) {
 	perror("setsockopt(SOL_IP, IP_MULTICAST_LOOP)");
 	goto fail;
@@ -530,7 +536,7 @@ int net_init_socket(QemuOpts *opts,
             qemu_opt_get(opts, "connect") ||
             qemu_opt_get(opts, "mcast") ||
             qemu_opt_get(opts, "localaddr")) {
-            error_report("listen=, connect=, mcast= and localaddr= is invalid with fd=\n");
+            error_report("listen=, connect=, mcast= and localaddr= is invalid with fd=");
             return -1;
         }
 
@@ -550,7 +556,7 @@ int net_init_socket(QemuOpts *opts,
             qemu_opt_get(opts, "connect") ||
             qemu_opt_get(opts, "mcast") ||
             qemu_opt_get(opts, "localaddr")) {
-            error_report("fd=, connect=, mcast= and localaddr= is invalid with listen=\n");
+            error_report("fd=, connect=, mcast= and localaddr= is invalid with listen=");
             return -1;
         }
 
@@ -566,7 +572,7 @@ int net_init_socket(QemuOpts *opts,
             qemu_opt_get(opts, "listen") ||
             qemu_opt_get(opts, "mcast") ||
             qemu_opt_get(opts, "localaddr")) {
-            error_report("fd=, listen=, mcast= and localaddr= is invalid with connect=\n");
+            error_report("fd=, listen=, mcast= and localaddr= is invalid with connect=");
             return -1;
         }
 

@@ -25,6 +25,8 @@
 #if !defined(__PPC_MAC_H__)
 #define __PPC_MAC_H__
 
+#include "memory.h"
+
 /* SMP is not enabled, for now */
 #define MAX_CPUS 1
 
@@ -35,8 +37,7 @@
 #define PROM_ADDR         0xfff00000
 
 #define KERNEL_LOAD_ADDR 0x01000000
-#define CMDLINE_ADDR     0x027ff000
-#define INITRD_LOAD_ADDR 0x02800000
+#define KERNEL_GAP       0x00100000
 
 #define ESCC_CLOCK 3686400
 
@@ -53,11 +54,12 @@ qemu_irq *heathrow_pic_init(int *pmem_index,
                             int nb_cpus, qemu_irq **irqs);
 
 /* Grackle PCI */
-PCIBus *pci_grackle_init(uint32_t base, qemu_irq *pic);
+PCIBus *pci_grackle_init(uint32_t base, qemu_irq *pic,
+                         MemoryRegion *address_space);
 
 /* UniNorth PCI */
-PCIBus *pci_pmac_init(qemu_irq *pic);
-PCIBus *pci_pmac_u3_init(qemu_irq *pic);
+PCIBus *pci_pmac_init(qemu_irq *pic, MemoryRegion *address_space);
+PCIBus *pci_pmac_u3_init(qemu_irq *pic, MemoryRegion *address_space);
 
 /* Mac NVRAM */
 typedef struct MacIONVRAMState MacIONVRAMState;

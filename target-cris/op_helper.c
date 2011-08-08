@@ -18,7 +18,8 @@
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "exec.h"
+#include "cpu.h"
+#include "dyngen-exec.h"
 #include "mmu.h"
 #include "helper.h"
 #include "host-utils.h"
@@ -35,6 +36,7 @@
 #endif
 
 #if !defined(CONFIG_USER_ONLY)
+#include "softmmu_exec.h"
 
 #define MMUSUFFIX _mmu
 
@@ -68,7 +70,7 @@ void tlb_fill (target_ulong addr, int is_write, int mmu_idx, void *retaddr)
 
     D_LOG("%s pc=%x tpc=%x ra=%x\n", __func__, 
 	     env->pc, env->debug1, retaddr);
-    ret = cpu_cris_handle_mmu_fault(env, addr, is_write, mmu_idx, 1);
+    ret = cpu_cris_handle_mmu_fault(env, addr, is_write, mmu_idx);
     if (unlikely(ret)) {
         if (retaddr) {
             /* now we have a real cpu fault */
@@ -83,7 +85,7 @@ void tlb_fill (target_ulong addr, int is_write, int mmu_idx, void *retaddr)
                 helper_top_evaluate_flags();
             }
         }
-        cpu_loop_exit();
+        cpu_loop_exit(env);
     }
     env = saved_env;
 }
@@ -93,7 +95,7 @@ void tlb_fill (target_ulong addr, int is_write, int mmu_idx, void *retaddr)
 void helper_raise_exception(uint32_t index)
 {
 	env->exception_index = index;
-	cpu_loop_exit();
+        cpu_loop_exit(env);
 }
 
 void helper_tlb_flush_pid(uint32_t pid)

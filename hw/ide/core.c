@@ -56,6 +56,7 @@ static const int smart_attributes[][12] = {
 };
 
 static int ide_handle_rw_error(IDEState *s, int error, int op);
+static void ide_dummy_transfer_stop(IDEState *s);
 
 static void padstr(char *str, const char *src, int len)
 {
@@ -78,7 +79,7 @@ static void ide_identify(IDEState *s)
 {
     uint16_t *p;
     unsigned int oldsize;
-    IDEDevice *dev;
+    IDEDevice *dev = s->unit ? s->bus->slave : s->bus->master;
 
     if (s->identify_set) {
 	memcpy(s->io_buffer, s->identify_data, sizeof(s->identify_data));
@@ -124,6 +125,9 @@ static void ide_identify(IDEState *s)
     put_le16(p + 66, 120);
     put_le16(p + 67, 120);
     put_le16(p + 68, 120);
+    if (dev && dev->conf.discard_granularity) {
+        put_le16(p + 69, (1 << 14)); /* determinate TRIM behavior */
+    }
 
     if (s->ncq_queues) {
         put_le16(p + 75, s->ncq_queues - 1);
@@ -154,9 +158,12 @@ static void ide_identify(IDEState *s)
     put_le16(p + 101, s->nb_sectors >> 16);
     put_le16(p + 102, s->nb_sectors >> 32);
     put_le16(p + 103, s->nb_sectors >> 48);
-    dev = s->unit ? s->bus->slave : s->bus->master;
+
     if (dev && dev->conf.physical_block_size)
         put_le16(p + 106, 0x6000 | get_physical_block_exp(&dev->conf));
+    if (dev && dev->conf.discard_granularity) {
+        put_le16(p + 169, 1); /* TRIM support */
+    }
 
     memcpy(s->identify_data, p, sizeof(s->identify_data));
     s->identify_set = 1;
@@ -297,6 +304,74 @@ static void ide_set_signature(IDEState *s)
         s->lcyl = 0xff;
         s->hcyl = 0xff;
     }
+}
+
+typedef struct TrimAIOCB {
+    BlockDriverAIOCB common;
+    QEMUBH *bh;
+    int ret;
+} TrimAIOCB;
+
+static void trim_aio_cancel(BlockDriverAIOCB *acb)
+{
+    TrimAIOCB *iocb = container_of(acb, TrimAIOCB, common);
+
+    qemu_bh_delete(iocb->bh);
+    iocb->bh = NULL;
+    qemu_aio_release(iocb);
+}
+
+static AIOPool trim_aio_pool = {
+    .aiocb_size         = sizeof(TrimAIOCB),
+    .cancel             = trim_aio_cancel,
+};
+
+static void ide_trim_bh_cb(void *opaque)
+{
+    TrimAIOCB *iocb = opaque;
+
+    iocb->common.cb(iocb->common.opaque, iocb->ret);
+
+    qemu_bh_delete(iocb->bh);
+    iocb->bh = NULL;
+
+    qemu_aio_release(iocb);
+}
+
+BlockDriverAIOCB *ide_issue_trim(BlockDriverState *bs,
+        int64_t sector_num, QEMUIOVector *qiov, int nb_sectors,
+        BlockDriverCompletionFunc *cb, void *opaque)
+{
+    TrimAIOCB *iocb;
+    int i, j, ret;
+
+    iocb = qemu_aio_get(&trim_aio_pool, bs, cb, opaque);
+    iocb->bh = qemu_bh_new(ide_trim_bh_cb, iocb);
+    iocb->ret = 0;
+
+    for (j = 0; j < qiov->niov; j++) {
+        uint64_t *buffer = qiov->iov[j].iov_base;
+
+        for (i = 0; i < qiov->iov[j].iov_len / 8; i++) {
+            /* 6-byte LBA + 2-byte range per entry */
+            uint64_t entry = le64_to_cpu(buffer[i]);
+            uint64_t sector = entry & 0x0000ffffffffffffULL;
+            uint16_t count = entry >> 48;
+
+            if (count == 0) {
+                break;
+            }
+
+            ret = bdrv_discard(bs, sector, count);
+            if (!iocb->ret) {
+                iocb->ret = ret;
+            }
+        }
+    }
+
+    qemu_bh_schedule(iocb->bh);
+
+    return &iocb->common;
 }
 
 static inline void ide_abort_command(IDEState *s)
@@ -446,7 +521,7 @@ static int ide_handle_rw_error(IDEState *s, int error, int op)
     if ((error == ENOSPC && action == BLOCK_ERR_STOP_ENOSPC)
             || action == BLOCK_ERR_STOP_ANY) {
         s->bus->dma->ops->set_unit(s->bus->dma, s->unit);
-        s->bus->dma->ops->add_status(s->bus->dma, op);
+        s->bus->error_status = op;
         bdrv_mon_event(s->bs, BDRV_ACTION_STOP, is_read);
         vm_stop(VMSTOP_DISKFULL);
     } else {
@@ -472,8 +547,11 @@ handle_rw_error:
     if (ret < 0) {
         int op = BM_STATUS_DMA_RETRY;
 
-        if (s->is_read)
+        if (s->dma_cmd == IDE_DMA_READ)
             op |= BM_STATUS_RETRY_READ;
+        else if (s->dma_cmd == IDE_DMA_TRIM)
+            op |= BM_STATUS_RETRY_TRIM;
+
         if (ide_handle_rw_error(s, -ret, op)) {
             return;
         }
@@ -482,7 +560,7 @@ handle_rw_error:
     n = s->io_buffer_size >> 9;
     sector_num = ide_get_sector(s);
     if (n > 0) {
-        dma_buf_commit(s, s->is_read);
+        dma_buf_commit(s, ide_cmd_is_read(s));
         sector_num += n;
         ide_set_sector(s, sector_num);
         s->nsector -= n;
@@ -499,23 +577,30 @@ handle_rw_error:
     n = s->nsector;
     s->io_buffer_index = 0;
     s->io_buffer_size = n * 512;
-    if (s->bus->dma->ops->prepare_buf(s->bus->dma, s->is_read) == 0) {
+    if (s->bus->dma->ops->prepare_buf(s->bus->dma, ide_cmd_is_read(s)) == 0) {
         /* The PRDs were too short. Reset the Active bit, but don't raise an
          * interrupt. */
         goto eot;
     }
 
 #ifdef DEBUG_AIO
-    printf("ide_dma_cb: sector_num=%" PRId64 " n=%d, is_read=%d\n",
-           sector_num, n, s->is_read);
+    printf("ide_dma_cb: sector_num=%" PRId64 " n=%d, cmd_cmd=%d\n",
+           sector_num, n, s->dma_cmd);
 #endif
 
-    if (s->is_read) {
+    switch (s->dma_cmd) {
+    case IDE_DMA_READ:
         s->bus->dma->aiocb = dma_bdrv_read(s->bs, &s->sg, sector_num,
                                            ide_dma_cb, s);
-    } else {
+        break;
+    case IDE_DMA_WRITE:
         s->bus->dma->aiocb = dma_bdrv_write(s->bs, &s->sg, sector_num,
                                             ide_dma_cb, s);
+        break;
+    case IDE_DMA_TRIM:
+        s->bus->dma->aiocb = dma_bdrv_io(s->bs, &s->sg, sector_num,
+                                         ide_issue_trim, ide_dma_cb, s, 1);
+        break;
     }
 
     if (!s->bus->dma->aiocb) {
@@ -528,12 +613,12 @@ eot:
    ide_set_inactive(s);
 }
 
-static void ide_sector_start_dma(IDEState *s, int is_read)
+static void ide_sector_start_dma(IDEState *s, enum ide_dma_cmd dma_cmd)
 {
     s->status = READY_STAT | SEEK_STAT | DRQ_STAT | BUSY_STAT;
     s->io_buffer_index = 0;
     s->io_buffer_size = 0;
-    s->is_read = is_read;
+    s->dma_cmd = dma_cmd;
     s->bus->dma->ops->start_dma(s->bus->dma, s, ide_dma_cb);
 }
 
@@ -815,6 +900,18 @@ void ide_exec_cmd(IDEBus *bus, uint32_t val)
         return;
 
     switch(val) {
+    case WIN_DSM:
+        switch (s->feature) {
+        case DSM_TRIM:
+            if (!s->bs) {
+                goto abort_cmd;
+            }
+            ide_sector_start_dma(s, IDE_DMA_TRIM);
+            break;
+        default:
+            goto abort_cmd;
+        }
+        break;
     case WIN_IDENTIFY:
         if (s->bs && s->drive_kind != IDE_CD) {
             if (s->drive_kind != IDE_CFATA)
@@ -916,7 +1013,7 @@ void ide_exec_cmd(IDEBus *bus, uint32_t val)
         if (!s->bs)
             goto abort_cmd;
 	ide_cmd_lba48_transform(s, lba48);
-        ide_sector_start_dma(s, 1);
+        ide_sector_start_dma(s, IDE_DMA_READ);
         break;
 	case WIN_WRITEDMA_EXT:
 	lba48 = 1;
@@ -925,7 +1022,7 @@ void ide_exec_cmd(IDEBus *bus, uint32_t val)
         if (!s->bs)
             goto abort_cmd;
 	ide_cmd_lba48_transform(s, lba48);
-        ide_sector_start_dma(s, 0);
+        ide_sector_start_dma(s, IDE_DMA_WRITE);
         s->media_changed = 1;
         break;
     case WIN_READ_NATIVE_MAX_EXT:
@@ -1436,15 +1533,36 @@ void ide_cmd_write(void *opaque, uint32_t addr, uint32_t val)
     bus->cmd = val;
 }
 
+/*
+ * Returns true if the running PIO transfer is a PIO out (i.e. data is
+ * transferred from the device to the guest), false if it's a PIO in
+ */
+static bool ide_is_pio_out(IDEState *s)
+{
+    if (s->end_transfer_func == ide_sector_write ||
+        s->end_transfer_func == ide_atapi_cmd) {
+        return false;
+    } else if (s->end_transfer_func == ide_sector_read ||
+               s->end_transfer_func == ide_transfer_stop ||
+               s->end_transfer_func == ide_atapi_cmd_reply_end ||
+               s->end_transfer_func == ide_dummy_transfer_stop) {
+        return true;
+    }
+
+    abort();
+}
+
 void ide_data_writew(void *opaque, uint32_t addr, uint32_t val)
 {
     IDEBus *bus = opaque;
     IDEState *s = idebus_active_if(bus);
     uint8_t *p;
 
-    /* PIO data access allowed only when DRQ bit is set */
-    if (!(s->status & DRQ_STAT))
+    /* PIO data access allowed only when DRQ bit is set. The result of a write
+     * during PIO out is indeterminate, just ignore it. */
+    if (!(s->status & DRQ_STAT) || ide_is_pio_out(s)) {
         return;
+    }
 
     p = s->data_ptr;
     *(uint16_t *)p = le16_to_cpu(val);
@@ -1461,9 +1579,11 @@ uint32_t ide_data_readw(void *opaque, uint32_t addr)
     uint8_t *p;
     int ret;
 
-    /* PIO data access allowed only when DRQ bit is set */
-    if (!(s->status & DRQ_STAT))
+    /* PIO data access allowed only when DRQ bit is set. The result of a read
+     * during PIO in is indeterminate, return 0 and don't move forward. */
+    if (!(s->status & DRQ_STAT) || !ide_is_pio_out(s)) {
         return 0;
+    }
 
     p = s->data_ptr;
     ret = cpu_to_le16(*(uint16_t *)p);
@@ -1480,9 +1600,11 @@ void ide_data_writel(void *opaque, uint32_t addr, uint32_t val)
     IDEState *s = idebus_active_if(bus);
     uint8_t *p;
 
-    /* PIO data access allowed only when DRQ bit is set */
-    if (!(s->status & DRQ_STAT))
+    /* PIO data access allowed only when DRQ bit is set. The result of a write
+     * during PIO out is indeterminate, just ignore it. */
+    if (!(s->status & DRQ_STAT) || ide_is_pio_out(s)) {
         return;
+    }
 
     p = s->data_ptr;
     *(uint32_t *)p = le32_to_cpu(val);
@@ -1499,9 +1621,11 @@ uint32_t ide_data_readl(void *opaque, uint32_t addr)
     uint8_t *p;
     int ret;
 
-    /* PIO data access allowed only when DRQ bit is set */
-    if (!(s->status & DRQ_STAT))
+    /* PIO data access allowed only when DRQ bit is set. The result of a read
+     * during PIO in is indeterminate, return 0 and don't move forward. */
+    if (!(s->status & DRQ_STAT) || !ide_is_pio_out(s)) {
         return 0;
+    }
 
     p = s->data_ptr;
     ret = cpu_to_le32(*(uint32_t *)p);
@@ -1665,9 +1789,13 @@ static void ide_init1(IDEBus *bus, int unit)
     s->unit = unit;
     s->drive_serial = drive_serial++;
     /* we need at least 2k alignment for accessing CDROMs using O_DIRECT */
-    s->io_buffer = qemu_memalign(2048, IDE_DMA_BUF_SECTORS*512 + 4);
     s->io_buffer_total_len = IDE_DMA_BUF_SECTORS*512 + 4;
+    s->io_buffer = qemu_memalign(2048, s->io_buffer_total_len);
+    memset(s->io_buffer, 0, s->io_buffer_total_len);
+
     s->smart_selftest_data = qemu_blockalign(s->bs, 512);
+    memset(s->smart_selftest_data, 0, 512);
+
     s->sector_write_timer = qemu_new_timer_ns(vm_clock,
                                            ide_sector_write_timer_cb, s);
 }
@@ -1837,7 +1965,8 @@ static bool ide_drive_pio_state_needed(void *opaque)
 {
     IDEState *s = opaque;
 
-    return (s->status & DRQ_STAT) != 0;
+    return ((s->status & DRQ_STAT) != 0)
+        || (s->bus->error_status & BM_STATUS_PIO_RETRY);
 }
 
 static bool ide_atapi_gesn_needed(void *opaque)
@@ -1845,6 +1974,13 @@ static bool ide_atapi_gesn_needed(void *opaque)
     IDEState *s = opaque;
 
     return s->events.new_media || s->events.eject_request;
+}
+
+static bool ide_error_needed(void *opaque)
+{
+    IDEBus *bus = opaque;
+
+    return (bus->error_status != 0);
 }
 
 /* Fields for GET_EVENT_STATUS_NOTIFICATION ATAPI command */
@@ -1856,6 +1992,7 @@ const VMStateDescription vmstate_ide_atapi_gesn_state = {
     .fields = (VMStateField []) {
         VMSTATE_BOOL(events.new_media, IDEState),
         VMSTATE_BOOL(events.eject_request, IDEState),
+        VMSTATE_END_OF_LIST()
     }
 };
 
@@ -1921,6 +2058,17 @@ const VMStateDescription vmstate_ide_drive = {
     }
 };
 
+const VMStateDescription vmstate_ide_error_status = {
+    .name ="ide_bus/error",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .minimum_version_id_old = 1,
+    .fields = (VMStateField []) {
+        VMSTATE_INT32(error_status, IDEBus),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
 const VMStateDescription vmstate_ide_bus = {
     .name = "ide_bus",
     .version_id = 1,
@@ -1930,6 +2078,14 @@ const VMStateDescription vmstate_ide_bus = {
         VMSTATE_UINT8(cmd, IDEBus),
         VMSTATE_UINT8(unit, IDEBus),
         VMSTATE_END_OF_LIST()
+    },
+    .subsections = (VMStateSubsection []) {
+        {
+            .vmsd = &vmstate_ide_error_status,
+            .needed = ide_error_needed,
+        }, {
+            /* empty */
+        }
     }
 };
 

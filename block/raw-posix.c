@@ -46,6 +46,8 @@
 #include <sys/dkio.h>
 #endif
 #ifdef __linux__
+#include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <sys/param.h>
 #include <linux/cdrom.h>
@@ -228,12 +230,14 @@ static int raw_open_common(BlockDriverState *bs, const char *filename,
         }
     }
 
+    /* We're falling back to POSIX AIO in some cases so init always */
+    if (paio_init() < 0) {
+        goto out_free_buf;
+    }
+
 #ifdef CONFIG_LINUX_AIO
     if ((bdrv_flags & (BDRV_O_NOCACHE|BDRV_O_NATIVE_AIO)) ==
                       (BDRV_O_NOCACHE|BDRV_O_NATIVE_AIO)) {
-
-        /* We're falling back to POSIX AIO in some cases */
-        paio_init();
 
         s->aio_ctx = laio_init();
         if (!s->aio_ctx) {
@@ -243,9 +247,6 @@ static int raw_open_common(BlockDriverState *bs, const char *filename,
     } else
 #endif
     {
-        if (paio_init() < 0) {
-            goto out_free_buf;
-        }
 #ifdef CONFIG_LINUX_AIO
         s->use_aio = 0;
 #endif
@@ -585,7 +586,7 @@ static BlockDriverAIOCB *raw_aio_submit(BlockDriverState *bs,
 
     /*
      * If O_DIRECT is used the buffer needs to be aligned on a sector
-     * boundary.  Check if this is the case or telll the low-level
+     * boundary.  Check if this is the case or tell the low-level
      * driver that it needs to copy the buffer.
      */
     if (s->aligned_buf) {
@@ -791,6 +792,17 @@ static int64_t raw_getlength(BlockDriverState *bs)
 }
 #endif
 
+static int64_t raw_get_allocated_file_size(BlockDriverState *bs)
+{
+    struct stat st;
+    BDRVRawState *s = bs->opaque;
+
+    if (fstat(s->fd, &st) < 0) {
+        return -errno;
+    }
+    return (int64_t)st.st_blocks * 512;
+}
+
 static int raw_create(const char *filename, QEMUOptionParameter *options)
 {
     int fd;
@@ -886,6 +898,8 @@ static BlockDriver bdrv_file = {
 
     .bdrv_truncate = raw_truncate,
     .bdrv_getlength = raw_getlength,
+    .bdrv_get_allocated_file_size
+                        = raw_get_allocated_file_size,
 
     .create_options = raw_create_options,
 };
@@ -1154,6 +1168,8 @@ static BlockDriver bdrv_host_device = {
     .bdrv_read          = raw_read,
     .bdrv_write         = raw_write,
     .bdrv_getlength	= raw_getlength,
+    .bdrv_get_allocated_file_size
+                        = raw_get_allocated_file_size,
 
     /* generic scsi device */
 #ifdef __linux__
@@ -1188,6 +1204,7 @@ static int floppy_probe_device(const char *filename)
     int fd, ret;
     int prio = 0;
     struct floppy_struct fdparam;
+    struct stat st;
 
     if (strstart(filename, "/dev/fd", NULL))
         prio = 50;
@@ -1196,12 +1213,17 @@ static int floppy_probe_device(const char *filename)
     if (fd < 0) {
         goto out;
     }
+    ret = fstat(fd, &st);
+    if (ret == -1 || !S_ISBLK(st.st_mode)) {
+        goto outc;
+    }
 
     /* Attempt to detect via a floppy specific ioctl */
     ret = ioctl(fd, FDGETPRM, &fdparam);
     if (ret >= 0)
         prio = 100;
 
+outc:
     close(fd);
 out:
     return prio;
@@ -1231,7 +1253,7 @@ static int floppy_media_changed(BlockDriverState *bs)
     return ret;
 }
 
-static int floppy_eject(BlockDriverState *bs, int eject_flag)
+static void floppy_eject(BlockDriverState *bs, int eject_flag)
 {
     BDRVRawState *s = bs->opaque;
     int fd;
@@ -1246,8 +1268,6 @@ static int floppy_eject(BlockDriverState *bs, int eject_flag)
             perror("FDEJECT");
         close(fd);
     }
-
-    return 0;
 }
 
 static BlockDriver bdrv_host_floppy = {
@@ -1269,6 +1289,8 @@ static BlockDriver bdrv_host_floppy = {
     .bdrv_read          = raw_read,
     .bdrv_write         = raw_write,
     .bdrv_getlength	= raw_getlength,
+    .bdrv_get_allocated_file_size
+                        = raw_get_allocated_file_size,
 
     /* removable device support */
     .bdrv_is_inserted   = floppy_is_inserted,
@@ -1290,10 +1312,15 @@ static int cdrom_probe_device(const char *filename)
 {
     int fd, ret;
     int prio = 0;
+    struct stat st;
 
     fd = open(filename, O_RDONLY | O_NONBLOCK);
     if (fd < 0) {
         goto out;
+    }
+    ret = fstat(fd, &st);
+    if (ret == -1 || !S_ISBLK(st.st_mode)) {
+        goto outc;
     }
 
     /* Attempt to detect via a CDROM specific ioctl */
@@ -1301,6 +1328,7 @@ static int cdrom_probe_device(const char *filename)
     if (ret >= 0)
         prio = 100;
 
+outc:
     close(fd);
 out:
     return prio;
@@ -1317,7 +1345,7 @@ static int cdrom_is_inserted(BlockDriverState *bs)
     return 0;
 }
 
-static int cdrom_eject(BlockDriverState *bs, int eject_flag)
+static void cdrom_eject(BlockDriverState *bs, int eject_flag)
 {
     BDRVRawState *s = bs->opaque;
 
@@ -1328,11 +1356,9 @@ static int cdrom_eject(BlockDriverState *bs, int eject_flag)
         if (ioctl(s->fd, CDROMCLOSETRAY, NULL) < 0)
             perror("CDROMEJECT");
     }
-
-    return 0;
 }
 
-static int cdrom_set_locked(BlockDriverState *bs, int locked)
+static void cdrom_set_locked(BlockDriverState *bs, int locked)
 {
     BDRVRawState *s = bs->opaque;
 
@@ -1343,8 +1369,6 @@ static int cdrom_set_locked(BlockDriverState *bs, int locked)
          */
         /* perror("CDROM_LOCKDOOR"); */
     }
-
-    return 0;
 }
 
 static BlockDriver bdrv_host_cdrom = {
@@ -1366,6 +1390,8 @@ static BlockDriver bdrv_host_cdrom = {
     .bdrv_read          = raw_read,
     .bdrv_write         = raw_write,
     .bdrv_getlength     = raw_getlength,
+    .bdrv_get_allocated_file_size
+                        = raw_get_allocated_file_size,
 
     /* removable device support */
     .bdrv_is_inserted   = cdrom_is_inserted,
@@ -1431,12 +1457,12 @@ static int cdrom_is_inserted(BlockDriverState *bs)
     return raw_getlength(bs) > 0;
 }
 
-static int cdrom_eject(BlockDriverState *bs, int eject_flag)
+static void cdrom_eject(BlockDriverState *bs, int eject_flag)
 {
     BDRVRawState *s = bs->opaque;
 
     if (s->fd < 0)
-        return -ENOTSUP;
+        return;
 
     (void) ioctl(s->fd, CDIOCALLOW);
 
@@ -1448,17 +1474,15 @@ static int cdrom_eject(BlockDriverState *bs, int eject_flag)
             perror("CDIOCCLOSE");
     }
 
-    if (cdrom_reopen(bs) < 0)
-        return -ENOTSUP;
-    return 0;
+    cdrom_reopen(bs);
 }
 
-static int cdrom_set_locked(BlockDriverState *bs, int locked)
+static void cdrom_set_locked(BlockDriverState *bs, int locked)
 {
     BDRVRawState *s = bs->opaque;
 
     if (s->fd < 0)
-        return -ENOTSUP;
+        return;
     if (ioctl(s->fd, (locked ? CDIOCPREVENT : CDIOCALLOW)) < 0) {
         /*
          * Note: an error can happen if the distribution automatically
@@ -1466,8 +1490,6 @@ static int cdrom_set_locked(BlockDriverState *bs, int locked)
          */
         /* perror("CDROM_LOCKDOOR"); */
     }
-
-    return 0;
 }
 
 static BlockDriver bdrv_host_cdrom = {
@@ -1489,6 +1511,8 @@ static BlockDriver bdrv_host_cdrom = {
     .bdrv_read          = raw_read,
     .bdrv_write         = raw_write,
     .bdrv_getlength     = raw_getlength,
+    .bdrv_get_allocated_file_size
+                        = raw_get_allocated_file_size,
 
     /* removable device support */
     .bdrv_is_inserted   = cdrom_is_inserted,

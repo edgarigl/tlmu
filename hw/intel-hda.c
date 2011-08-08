@@ -224,19 +224,6 @@ static target_phys_addr_t intel_hda_addr(uint32_t lbase, uint32_t ubase)
     return addr;
 }
 
-static void stl_phys_le(target_phys_addr_t addr, uint32_t value)
-{
-    uint32_t value_le = cpu_to_le32(value);
-    cpu_physical_memory_write(addr, (uint8_t*)(&value_le), sizeof(value_le));
-}
-
-static uint32_t ldl_phys_le(target_phys_addr_t addr)
-{
-    uint32_t value_le;
-    cpu_physical_memory_read(addr, (uint8_t*)(&value_le), sizeof(value_le));
-    return le32_to_cpu(value_le);
-}
-
 static void intel_hda_update_int_sts(IntelHDAState *d)
 {
     uint32_t sts = 0;
@@ -341,7 +328,7 @@ static void intel_hda_corb_run(IntelHDAState *d)
 
         rp = (d->corb_rp + 1) & 0xff;
         addr = intel_hda_addr(d->corb_lbase, d->corb_ubase);
-        verb = ldl_phys_le(addr + 4*rp);
+        verb = ldl_le_phys(addr + 4*rp);
         d->corb_rp = rp;
 
         dprint(d, 2, "%s: [rp 0x%x] verb 0x%08x\n", __FUNCTION__, rp, verb);
@@ -373,8 +360,8 @@ static void intel_hda_response(HDACodecDevice *dev, bool solicited, uint32_t res
     ex = (solicited ? 0 : (1 << 4)) | dev->cad;
     wp = (d->rirb_wp + 1) & 0xff;
     addr = intel_hda_addr(d->rirb_lbase, d->rirb_ubase);
-    stl_phys_le(addr + 8*wp, response);
-    stl_phys_le(addr + 8*wp + 4, ex);
+    stl_le_phys(addr + 8*wp, response);
+    stl_le_phys(addr + 8*wp + 4, ex);
     d->rirb_wp = wp;
 
     dprint(d, 2, "%s: [wp 0x%x] response 0x%x, extra 0x%x\n",
@@ -461,7 +448,7 @@ static bool intel_hda_xfer(HDACodecDevice *dev, uint32_t stnr, bool output,
     }
     if (d->dp_lbase & 0x01) {
         addr = intel_hda_addr(d->dp_lbase & ~0x01, d->dp_ubase);
-        stl_phys_le(addr + 8*s, st->lpib);
+        stl_le_phys(addr + 8*s, st->lpib);
     }
     dprint(d, 3, "dma: --\n");
 
@@ -1138,10 +1125,6 @@ static int intel_hda_init(PCIDevice *pci)
 
     d->name = d->pci.qdev.info->name;
 
-    pci_config_set_vendor_id(conf, PCI_VENDOR_ID_INTEL);
-    pci_config_set_device_id(conf, 0x2668);
-    pci_config_set_revision(conf, 1);
-    pci_config_set_class(conf, PCI_CLASS_MULTIMEDIA_HD_AUDIO);
     pci_config_set_interrupt_pin(conf, 1);
 
     /* HDCTL off 0x40 bit 0 selects signaling mode (1-HDA, 0 - Ac97) 18.1.19 */
@@ -1265,6 +1248,10 @@ static PCIDeviceInfo intel_hda_info = {
     .init         = intel_hda_init,
     .exit         = intel_hda_exit,
     .config_write = intel_hda_write_config,
+    .vendor_id    = PCI_VENDOR_ID_INTEL,
+    .device_id    = 0x2668,
+    .revision     = 1,
+    .class_id     = PCI_CLASS_MULTIMEDIA_HD_AUDIO,
     .qdev.props   = (Property[]) {
         DEFINE_PROP_UINT32("debug", IntelHDAState, debug, 0),
         DEFINE_PROP_UINT32("msi", IntelHDAState, msi, 1),

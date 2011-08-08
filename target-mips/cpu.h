@@ -1,6 +1,8 @@
 #if !defined (__MIPS_CPU_H__)
 #define __MIPS_CPU_H__
 
+//#define DEBUG_OP
+
 #define TARGET_HAS_ICE 1
 
 #define ELF_MACHINE	EM_MIPS
@@ -493,8 +495,8 @@ void r4k_helper_tlbwr (void);
 void r4k_helper_tlbp (void);
 void r4k_helper_tlbr (void);
 
-void do_unassigned_access(target_phys_addr_t addr, int is_write, int is_exec,
-                          int unused, int size);
+void cpu_unassigned_access(CPUState *env, target_phys_addr_t addr,
+                           int is_write, int is_exec, int unused, int size);
 #endif
 
 void mips_cpu_list (FILE *f, fprintf_function cpu_fprintf);
@@ -634,7 +636,7 @@ void cpu_mips_soft_irq(CPUState *env, int irq, int level);
 
 /* helper.c */
 int cpu_mips_handle_mmu_fault (CPUState *env, target_ulong address, int rw,
-                               int mmu_idx, int is_softmmu);
+                               int mmu_idx);
 #define cpu_handle_mmu_fault cpu_mips_handle_mmu_fault
 void do_interrupt (CPUState *env);
 #if !defined(CONFIG_USER_ONLY)
@@ -654,6 +656,30 @@ static inline void cpu_get_tb_cpu_state(CPUState *env, target_ulong *pc,
 static inline void cpu_set_tls(CPUState *env, target_ulong newtls)
 {
     env->tls_value = newtls;
+}
+
+static inline int cpu_has_work(CPUState *env)
+{
+    int has_work = 0;
+
+    /* It is implementation dependent if non-enabled interrupts
+       wake-up the CPU, however most of the implementations only
+       check for interrupts that can be taken. */
+    if ((env->interrupt_request & CPU_INTERRUPT_HARD) &&
+        cpu_mips_hw_interrupts_pending(env)) {
+        has_work = 1;
+    }
+
+    return has_work;
+}
+
+#include "exec-all.h"
+
+static inline void cpu_pc_from_tb(CPUState *env, TranslationBlock *tb)
+{
+    env->active_tc.PC = tb->pc;
+    env->hflags &= ~MIPS_HFLAG_BMASK;
+    env->hflags |= tb->flags & MIPS_HFLAG_BMASK;
 }
 
 #endif /* !defined (__MIPS_CPU_H__) */

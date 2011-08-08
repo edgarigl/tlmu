@@ -4,7 +4,7 @@
  * Copyright (c) 2006 CodeSourcery.
  * Written by Paul Brook
  *
- * This code is licenced under the LGPL.
+ * This code is licensed under the LGPL.
  */
 
 /* ??? Need to check if the {read,write}[wl] routines work properly on
@@ -661,7 +661,7 @@ static lsi_request *lsi_find_by_tag(LSIState *s, uint32_t tag)
 static void lsi_request_cancelled(SCSIRequest *req)
 {
     LSIState *s = DO_UPCAST(LSIState, dev.qdev, req->bus->qbus.parent);
-    lsi_request *p;
+    lsi_request *p = req->hba_private;
 
     if (s->current && req == s->current->req) {
         scsi_req_unref(req);
@@ -670,7 +670,6 @@ static void lsi_request_cancelled(SCSIRequest *req)
         return;
     }
 
-    p = lsi_find_by_tag(s, req->tag);
     if (p) {
         QTAILQ_REMOVE(&s->queue, p, next);
         scsi_req_unref(req);
@@ -680,18 +679,12 @@ static void lsi_request_cancelled(SCSIRequest *req)
 
 /* Record that data is available for a queued command.  Returns zero if
    the device was reselected, nonzero if the IO is deferred.  */
-static int lsi_queue_tag(LSIState *s, uint32_t tag, uint32_t len)
+static int lsi_queue_req(LSIState *s, SCSIRequest *req, uint32_t len)
 {
-    lsi_request *p;
-
-    p = lsi_find_by_tag(s, tag);
-    if (!p) {
-        BADF("IO with unknown tag %d\n", tag);
-        return 1;
-    }
+    lsi_request *p = req->hba_private;
 
     if (p->pending) {
-        BADF("Multiple IO pending for tag %d\n", tag);
+        BADF("Multiple IO pending for request %p\n", p);
     }
     p->pending = len;
     /* Reselect if waiting for it, or if reselection triggers an IRQ
@@ -743,9 +736,9 @@ static void lsi_transfer_data(SCSIRequest *req, uint32_t len)
     LSIState *s = DO_UPCAST(LSIState, dev.qdev, req->bus->qbus.parent);
     int out;
 
-    if (s->waiting == 1 || !s->current || req->tag != s->current->tag ||
+    if (s->waiting == 1 || !s->current || req->hba_private != s->current ||
         (lsi_irq_on_rsl(s) && !(s->scntl1 & LSI_SCNTL1_CON))) {
-        if (lsi_queue_tag(s, req->tag, len)) {
+        if (lsi_queue_req(s, req, len)) {
             return;
         }
     }
@@ -789,7 +782,8 @@ static void lsi_do_command(LSIState *s)
     assert(s->current == NULL);
     s->current = qemu_mallocz(sizeof(lsi_request));
     s->current->tag = s->select_tag;
-    s->current->req = scsi_req_new(dev, s->current->tag, s->current_lun);
+    s->current->req = scsi_req_new(dev, s->current->tag, s->current_lun,
+                                   s->current);
 
     n = scsi_req_enqueue(s->current->req, buf);
     if (n) {
@@ -889,7 +883,6 @@ static void lsi_do_msgout(LSIState *s)
     uint8_t msg;
     int len;
     uint32_t current_tag;
-    SCSIDevice *current_dev;
     lsi_request *current_req, *p, *p_next;
     int id;
 
@@ -901,7 +894,6 @@ static void lsi_do_msgout(LSIState *s)
         current_req = lsi_find_by_tag(s, current_tag);
     }
     id = (current_tag >> 8) & 0xf;
-    current_dev = s->bus.devs[id];
 
     DPRINTF("MSG out len=%d\n", s->dbc);
     while (s->dbc) {
@@ -2258,15 +2250,6 @@ static int lsi_scsi_init(PCIDevice *dev)
 
     pci_conf = s->dev.config;
 
-    /* PCI Vendor ID (word) */
-    pci_config_set_vendor_id(pci_conf, PCI_VENDOR_ID_LSI_LOGIC);
-    /* PCI device ID (word) */
-    pci_config_set_device_id(pci_conf, PCI_DEVICE_ID_LSI_53C895A);
-    /* PCI base class code */
-    pci_config_set_class(pci_conf, PCI_CLASS_STORAGE_SCSI);
-    /* PCI subsystem ID */
-    pci_conf[PCI_SUBSYSTEM_ID] = 0x00;
-    pci_conf[PCI_SUBSYSTEM_ID + 1] = 0x10;
     /* PCI latency timer = 255 */
     pci_conf[PCI_LATENCY_TIMER] = 0xff;
     /* TODO: RST# value should be 0 */
@@ -2302,6 +2285,10 @@ static PCIDeviceInfo lsi_info = {
     .qdev.vmsd  = &vmstate_lsi_scsi,
     .init       = lsi_scsi_init,
     .exit       = lsi_scsi_uninit,
+    .vendor_id  = PCI_VENDOR_ID_LSI_LOGIC,
+    .device_id  = PCI_DEVICE_ID_LSI_53C895A,
+    .class_id   = PCI_CLASS_STORAGE_SCSI,
+    .subsystem_id = 0x1000,
 };
 
 static void lsi53c895a_register_devices(void)

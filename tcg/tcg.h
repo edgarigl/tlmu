@@ -410,6 +410,11 @@ static inline TCGv_i64 tcg_temp_local_new_i64(void)
 void tcg_temp_free_i64(TCGv_i64 arg);
 char *tcg_get_arg_str_i64(TCGContext *s, char *buf, int buf_size, TCGv_i64 arg);
 
+static inline bool tcg_arg_is_local(TCGContext *s, TCGArg arg)
+{
+    return s->temps[arg].temp_local;
+}
+
 #if defined(CONFIG_DEBUG_TCG)
 /* If you call tcg_clear_temp_count() at the start of a section of
  * code which is not supposed to leak any TCG temporaries, then
@@ -502,6 +507,9 @@ void tcg_gen_callN(TCGContext *s, TCGv_ptr func, unsigned int flags,
 void tcg_gen_shifti_i64(TCGv_i64 ret, TCGv_i64 arg1,
                         int c, int right, int arith);
 
+TCGArg *tcg_optimize(TCGContext *s, uint16_t *tcg_opc_ptr, TCGArg *args,
+                     TCGOpDef *tcg_op_def);
+
 /* only used for debugging purposes */
 void tcg_register_helper(void *func, const char *name);
 const char *tcg_helper_get_name(TCGContext *s, void *func);
@@ -515,8 +523,9 @@ TCGv_i64 tcg_const_local_i64(int64_t val);
 
 extern uint8_t code_gen_prologue[];
 #if defined(_ARCH_PPC) && !defined(_ARCH_PPC64)
-#define tcg_qemu_tb_exec(tb_ptr) \
-    ((long REGPARM __attribute__ ((longcall)) (*)(void *))code_gen_prologue)(tb_ptr)
+#define tcg_qemu_tb_exec(env, tb_ptr)                                    \
+    ((long REGPARM __attribute__ ((longcall)) (*)(void *, void *))code_gen_prologue)(env, tb_ptr)
 #else
-#define tcg_qemu_tb_exec(tb_ptr) ((long REGPARM (*)(void *))code_gen_prologue)(tb_ptr)
+#define tcg_qemu_tb_exec(env, tb_ptr)                                    \
+    ((long REGPARM (*)(void *, void *))code_gen_prologue)(env, tb_ptr)
 #endif

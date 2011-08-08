@@ -27,6 +27,7 @@
 #include "pci.h"
 #include "pci_host.h"
 #include "pc.h"
+#include "exec-memory.h"
 
 //#define DEBUG
 
@@ -1092,7 +1093,8 @@ PCIBus *gt64120_register(qemu_irq *pic)
     d = FROM_SYSBUS(GT64120State, s);
     d->pci.bus = pci_register_bus(&d->busdev.qdev, "pci",
                                   gt64120_pci_set_irq, gt64120_pci_map_irq,
-                                  pic, PCI_DEVFN(18, 0), 4);
+                                  pic, get_system_memory(),
+                                  PCI_DEVFN(18, 0), 4);
     d->ISD_handle = cpu_register_io_memory(gt64120_read, gt64120_write, d,
                                            DEVICE_NATIVE_ENDIAN);
 
@@ -1118,14 +1120,10 @@ static int gt64120_init(SysBusDevice *dev)
 static int gt64120_pci_init(PCIDevice *d)
 {
     /* FIXME: Malta specific hw assumptions ahead */
-    pci_config_set_vendor_id(d->config, PCI_VENDOR_ID_MARVELL);
-    pci_config_set_device_id(d->config, PCI_DEVICE_ID_MARVELL_GT6412X);
     pci_set_word(d->config + PCI_COMMAND, 0);
     pci_set_word(d->config + PCI_STATUS,
                  PCI_STATUS_FAST_BACK | PCI_STATUS_DEVSEL_MEDIUM);
-    pci_set_byte(d->config + PCI_CLASS_REVISION, 0x10);
     pci_config_set_prog_interface(d->config, 0);
-    pci_config_set_class(d->config, PCI_CLASS_BRIDGE_HOST);
     pci_set_long(d->config + PCI_BASE_ADDRESS_0, 0x00000008);
     pci_set_long(d->config + PCI_BASE_ADDRESS_1, 0x01000008);
     pci_set_long(d->config + PCI_BASE_ADDRESS_2, 0x1c000000);
@@ -1141,6 +1139,10 @@ static PCIDeviceInfo gt64120_pci_info = {
     .qdev.name = "gt64120_pci",
     .qdev.size = sizeof(PCIDevice),
     .init      = gt64120_pci_init,
+    .vendor_id = PCI_VENDOR_ID_MARVELL,
+    .device_id = PCI_DEVICE_ID_MARVELL_GT6412X,
+    .revision  = 0x10,
+    .class_id  = PCI_CLASS_BRIDGE_HOST,
 };
 
 static void gt64120_pci_register_devices(void)

@@ -438,8 +438,12 @@
 #define CPUID_VENDOR_INTEL_3 0x6c65746e /* "ntel" */
 
 #define CPUID_VENDOR_AMD_1   0x68747541 /* "Auth" */
-#define CPUID_VENDOR_AMD_2   0x69746e65 /* "enti" */ 
+#define CPUID_VENDOR_AMD_2   0x69746e65 /* "enti" */
 #define CPUID_VENDOR_AMD_3   0x444d4163 /* "cAMD" */
+
+#define CPUID_VENDOR_VIA_1   0x746e6543 /* "Cent" */
+#define CPUID_VENDOR_VIA_2   0x48727561 /* "aurH" */
+#define CPUID_VENDOR_VIA_3   0x736c7561 /* "auls" */
 
 #define CPUID_MWAIT_IBE     (1 << 1) /* Interrupts can exit capability */
 #define CPUID_MWAIT_EMX     (1 << 0) /* enumeration supported */
@@ -637,6 +641,10 @@ typedef struct CPUX86State {
     uint16_t fpuc;
     uint8_t fptags[8];   /* 0 = valid, 1 = empty */
     FPReg fpregs[8];
+    /* KVM-only so far */
+    uint16_t fpop;
+    uint64_t fpip;
+    uint64_t fpdp;
 
     /* emulator internal variables */
     float_status fp_status;
@@ -716,6 +724,9 @@ typedef struct CPUX86State {
     uint32_t cpuid_ext3_features;
     uint32_t cpuid_apic_id;
     int cpuid_vendor_override;
+    /* Store the results of Centaur's CPUID instructions */
+    uint32_t cpuid_xlevel2;
+    uint32_t cpuid_ext4_features;
 
     /* MTRRs */
     uint64_t mtrr_fixed[11];
@@ -878,7 +889,7 @@ void host_cpuid(uint32_t function, uint32_t count,
 
 /* helper.c */
 int cpu_x86_handle_mmu_fault(CPUX86State *env, target_ulong addr,
-                             int is_write, int mmu_idx, int is_softmmu);
+                             int is_write, int mmu_idx);
 #define cpu_handle_mmu_fault cpu_x86_handle_mmu_fault
 void cpu_x86_set_a20(CPUX86State *env, int a20_state);
 
@@ -946,6 +957,36 @@ static inline int cpu_mmu_index (CPUState *env)
     return (env->hflags & HF_CPL_MASK) == 3 ? 1 : 0;
 }
 
+#undef EAX
+#define EAX (env->regs[R_EAX])
+#undef ECX
+#define ECX (env->regs[R_ECX])
+#undef EDX
+#define EDX (env->regs[R_EDX])
+#undef EBX
+#define EBX (env->regs[R_EBX])
+#undef ESP
+#define ESP (env->regs[R_ESP])
+#undef EBP
+#define EBP (env->regs[R_EBP])
+#undef ESI
+#define ESI (env->regs[R_ESI])
+#undef EDI
+#define EDI (env->regs[R_EDI])
+#undef EIP
+#define EIP (env->eip)
+#define DF  (env->df)
+
+#define CC_SRC (env->cc_src)
+#define CC_DST (env->cc_dst)
+#define CC_OP  (env->cc_op)
+
+/* float macros */
+#define FT0    (env->ft0)
+#define ST0    (env->fpregs[env->fpstt].d)
+#define ST(n)  (env->fpregs[(env->fpstt + (n)) & 7].d)
+#define ST1    ST(1)
+
 /* translate.c */
 void optimize_flags_init(void);
 
@@ -970,6 +1011,23 @@ static inline void cpu_clone_regs(CPUState *env, target_ulong newsp)
 #include "hw/apic.h"
 #endif
 
+static inline bool cpu_has_work(CPUState *env)
+{
+    return ((env->interrupt_request & CPU_INTERRUPT_HARD) &&
+            (env->eflags & IF_MASK)) ||
+           (env->interrupt_request & (CPU_INTERRUPT_NMI |
+                                      CPU_INTERRUPT_INIT |
+                                      CPU_INTERRUPT_SIPI |
+                                      CPU_INTERRUPT_MCE));
+}
+
+#include "exec-all.h"
+
+static inline void cpu_pc_from_tb(CPUState *env, TranslationBlock *tb)
+{
+    env->eip = tb->pc - tb->cs_base;
+}
+
 static inline void cpu_get_tb_cpu_state(CPUState *env, target_ulong *pc,
                                         target_ulong *cs_base, int *flags)
 {
@@ -988,5 +1046,18 @@ void do_cpu_sipi(CPUState *env);
 void cpu_x86_inject_mce(Monitor *mon, CPUState *cenv, int bank,
                         uint64_t status, uint64_t mcg_status, uint64_t addr,
                         uint64_t misc, int flags);
+
+/* op_helper.c */
+void do_interrupt(CPUState *env);
+void do_interrupt_x86_hardirq(CPUState *env, int intno, int is_hw);
+void QEMU_NORETURN raise_exception_env(int exception_index, CPUState *nenv);
+void QEMU_NORETURN raise_exception_err_env(CPUState *nenv, int exception_index,
+                                           int error_code);
+
+void do_smm_enter(CPUState *env1);
+
+void svm_check_intercept(CPUState *env1, uint32_t type);
+
+uint32_t cpu_cc_compute_all(CPUState *env1, int op);
 
 #endif /* CPU_I386_H */

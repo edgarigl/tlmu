@@ -274,12 +274,15 @@ static void e500_pci_map(SysBusDevice *dev, target_phys_addr_t base)
                                  s->reg);
 }
 
+#include "exec-memory.h"
+
 static int e500_pcihost_initfn(SysBusDevice *dev)
 {
     PCIHostState *h;
     PPCE500PCIState *s;
     PCIBus *b;
     int i;
+    MemoryRegion *address_space = get_system_memory();
 
     h = FROM_SYSBUS(PCIHostState, sysbus_from_qdev(dev));
     s = DO_UPCAST(PPCE500PCIState, pci_state, h);
@@ -289,7 +292,8 @@ static int e500_pcihost_initfn(SysBusDevice *dev)
     }
 
     b = pci_register_bus(&s->pci_state.busdev.qdev, NULL, mpc85xx_pci_set_irq,
-                         mpc85xx_pci_map_irq, s->irq, PCI_DEVFN(0x11, 0), 4);
+                         mpc85xx_pci_map_irq, s->irq, address_space,
+                         PCI_DEVFN(0x11, 0), 4);
     s->pci_state.bus = b;
 
     pci_create_simple(b, 0, "e500-host-bridge");
@@ -304,20 +308,13 @@ static int e500_pcihost_initfn(SysBusDevice *dev)
     return 0;
 }
 
-static int e500_host_bridge_initfn(PCIDevice *dev)
-{
-    pci_config_set_vendor_id(dev->config, PCI_VENDOR_ID_FREESCALE);
-    pci_config_set_device_id(dev->config, PCI_DEVICE_ID_MPC8533E);
-    pci_config_set_class(dev->config, PCI_CLASS_PROCESSOR_POWERPC);
-
-    return 0;
-}
-
 static PCIDeviceInfo e500_host_bridge_info = {
     .qdev.name    = "e500-host-bridge",
     .qdev.desc    = "Host bridge",
     .qdev.size    = sizeof(PCIDevice),
-    .init         = e500_host_bridge_initfn,
+    .vendor_id    = PCI_VENDOR_ID_FREESCALE,
+    .device_id    = PCI_DEVICE_ID_MPC8533E,
+    .class_id     = PCI_CLASS_PROCESSOR_POWERPC,
 };
 
 static SysBusDeviceInfo e500_pcihost_info = {

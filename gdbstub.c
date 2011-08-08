@@ -37,7 +37,7 @@
 
 #define MAX_PACKET_LENGTH 4096
 
-#include "exec-all.h"
+#include "cpu.h"
 #include "qemu_socket.h"
 #include "kvm.h"
 
@@ -319,7 +319,7 @@ static int get_char(GDBState *s)
     int ret;
 
     for(;;) {
-        ret = recv(s->fd, &ch, 1, 0);
+        ret = qemu_recv(s->fd, &ch, 1, 0);
         if (ret < 0) {
             if (errno == ECONNRESET)
                 s->fd = -1;

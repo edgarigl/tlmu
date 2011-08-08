@@ -1349,8 +1349,15 @@ static struct DisplayAllocator default_allocator = {
 static void dumb_display_init(void)
 {
     DisplayState *ds = qemu_mallocz(sizeof(DisplayState));
+    int width = 640;
+    int height = 480;
+
     ds->allocator = &default_allocator;
-    ds->surface = qemu_create_displaysurface(ds, 640, 480);
+    if (is_fixedsize_console()) {
+        width = active_console->g_width;
+        height = active_console->g_height;
+    }
+    ds->surface = qemu_create_displaysurface(ds, width, height);
     register_displaystate(ds);
 }
 
@@ -1507,7 +1514,7 @@ static void text_console_do_init(CharDriverState *chr, DisplayState *ds)
         chr->init(chr);
 }
 
-CharDriverState *text_console_init(QemuOpts *opts)
+int text_console_init(QemuOpts *opts, CharDriverState **_chr)
 {
     CharDriverState *chr;
     TextConsole *s;
@@ -1539,7 +1546,7 @@ CharDriverState *text_console_init(QemuOpts *opts)
 
     if (!s) {
         free(chr);
-        return NULL;
+        return -EBUSY;
     }
 
     s->chr = chr;
@@ -1547,7 +1554,9 @@ CharDriverState *text_console_init(QemuOpts *opts)
     s->g_height = height;
     chr->opaque = s;
     chr->chr_set_echo = text_console_set_echo;
-    return chr;
+
+    *_chr = chr;
+    return 0;
 }
 
 void text_consoles_set_display(DisplayState *ds)

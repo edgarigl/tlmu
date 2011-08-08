@@ -42,6 +42,7 @@
 #include "mips.h"
 #include "pci_host.h"
 #include "sysemu.h"
+#include "exec-memory.h"
 
 //#define DEBUG_BONITO
 
@@ -691,11 +692,7 @@ static int bonito_initfn(PCIDevice *dev)
     PCIBonitoState *s = DO_UPCAST(PCIBonitoState, dev, dev);
 
     /* Bonito North Bridge, built on FPGA, VENDOR_ID/DEVICE_ID are "undefined" */
-    pci_config_set_vendor_id(dev->config, 0xdf53);
-    pci_config_set_device_id(dev->config, 0x00d5);
-    pci_config_set_class(dev->config, PCI_CLASS_BRIDGE_HOST);
     pci_config_set_prog_interface(dev->config, 0x00);
-    pci_config_set_revision(dev->config, 0x01);
 
     /* set the north bridge register mapping */
     s->bonito_reg_handle = cpu_register_io_memory(bonito_read, bonito_write, s,
@@ -777,7 +774,8 @@ PCIBus *bonito_init(qemu_irq *pic)
     dev = qdev_create(NULL, "Bonito-pcihost");
     pcihost = FROM_SYSBUS(BonitoState, sysbus_from_qdev(dev));
     b = pci_register_bus(&pcihost->busdev.qdev, "pci", pci_bonito_set_irq,
-                         pci_bonito_map_irq, pic, 0x28, 32);
+                         pci_bonito_map_irq, pic, get_system_memory(),
+                         0x28, 32);
     pcihost->bus = b;
     qdev_init_nofail(dev);
 
@@ -796,6 +794,11 @@ static PCIDeviceInfo bonito_info = {
     .qdev.vmsd    = &vmstate_bonito,
     .qdev.no_user = 1,
     .init         = bonito_initfn,
+    /*Bonito North Bridge, built on FPGA, VENDOR_ID/DEVICE_ID are "undefined"*/
+    .vendor_id    = 0xdf53,
+    .device_id    = 0x00d5,
+    .revision     = 0x01,
+    .class_id     = PCI_CLASS_BRIDGE_HOST,
 };
 
 static SysBusDeviceInfo bonito_pcihost_info = {

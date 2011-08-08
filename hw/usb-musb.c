@@ -261,12 +261,18 @@
 
 static void musb_attach(USBPort *port);
 static void musb_detach(USBPort *port);
-static void musb_schedule_cb(USBDevice *dev, USBPacket *p);
+static void musb_child_detach(USBPort *port, USBDevice *child);
+static void musb_schedule_cb(USBPort *port, USBPacket *p);
+static void musb_async_cancel_device(MUSBState *s, USBDevice *dev);
 
 static USBPortOps musb_port_ops = {
     .attach = musb_attach,
     .detach = musb_detach,
+    .child_detach = musb_child_detach,
     .complete = musb_schedule_cb,
+};
+
+static USBBusOps musb_bus_ops = {
 };
 
 typedef struct MUSBPacket MUSBPacket;
@@ -359,12 +365,13 @@ struct MUSBState *musb_init(qemu_irq *irqs)
         s->ep[i].maxp[1] = 0x40;
         s->ep[i].musb = s;
         s->ep[i].epnum = i;
+        usb_packet_init(&s->ep[i].packey[0].p);
+        usb_packet_init(&s->ep[i].packey[1].p);
     }
 
-    usb_bus_new(&s->bus, NULL /* FIXME */);
+    usb_bus_new(&s->bus, &musb_bus_ops, NULL /* FIXME */);
     usb_register_port(&s->bus, &s->port, s, 0, &musb_port_ops,
                       USB_SPEED_MASK_LOW | USB_SPEED_MASK_FULL);
-    usb_port_location(&s->port, NULL, 1);
 
     return s;
 }
@@ -493,8 +500,17 @@ static void musb_detach(USBPort *port)
 {
     MUSBState *s = (MUSBState *) port->opaque;
 
+    musb_async_cancel_device(s, port->dev);
+
     musb_intr_set(s, musb_irq_disconnect, 1);
     musb_session_update(s, 1, s->session);
+}
+
+static void musb_child_detach(USBPort *port, USBDevice *child)
+{
+    MUSBState *s = (MUSBState *) port->opaque;
+
+    musb_async_cancel_device(s, child);
 }
 
 static void musb_cb_tick0(void *opaque)
@@ -513,7 +529,7 @@ static void musb_cb_tick1(void *opaque)
 
 #define musb_cb_tick	(dir ? musb_cb_tick1 : musb_cb_tick0)
 
-static void musb_schedule_cb(USBDevice *dev, USBPacket *packey)
+static void musb_schedule_cb(USBPort *port, USBPacket *packey)
 {
     MUSBPacket *p = container_of(packey, MUSBPacket, p);
     MUSBEndPoint *ep = p->ep;
@@ -591,12 +607,10 @@ static void musb_packet(MUSBState *s, MUSBEndPoint *ep,
     ep->interrupt[dir] = ttype == USB_ENDPOINT_XFER_INT;
     ep->delayed_cb[dir] = cb;
 
-    ep->packey[dir].p.pid = pid;
     /* A wild guess on the FADDR semantics... */
-    ep->packey[dir].p.devaddr = ep->faddr[idx];
-    ep->packey[dir].p.devep = ep->type[idx] & 0xf;
-    ep->packey[dir].p.data = (void *) ep->buf[idx];
-    ep->packey[dir].p.len = len;
+    usb_packet_setup(&ep->packey[dir].p, pid, ep->faddr[idx],
+                     ep->type[idx] & 0xf);
+    usb_packet_addbuf(&ep->packey[dir].p, ep->buf[idx], len);
     ep->packey[dir].ep = ep;
     ep->packey[dir].dir = dir;
 
@@ -611,7 +625,7 @@ static void musb_packet(MUSBState *s, MUSBEndPoint *ep,
     }
 
     ep->status[dir] = ret;
-    usb_packet_complete(s->port.dev, &ep->packey[dir].p);
+    musb_schedule_cb(&s->port, &ep->packey[dir].p);
 }
 
 static void musb_tx_packet_complete(USBPacket *packey, void *opaque)
@@ -724,7 +738,7 @@ static void musb_rx_packet_complete(USBPacket *packey, void *opaque)
 
     if (ep->status[1] == USB_RET_STALL) {
         ep->status[1] = 0;
-        packey->len = 0;
+        packey->result = 0;
 
         ep->csr[1] |= MGC_M_RXCSR_H_RXSTALL;
         if (!epnum)
@@ -738,7 +752,7 @@ static void musb_rx_packet_complete(USBPacket *packey, void *opaque)
          * Data-errors in Isochronous.  */
         if (ep->interrupt[1])
             return musb_packet(s, ep, epnum, USB_TOKEN_IN,
-                            packey->len, musb_rx_packet_complete, 1);
+                            packey->iov.size, musb_rx_packet_complete, 1);
 
         ep->csr[1] |= MGC_M_RXCSR_DATAERROR;
         if (!epnum)
@@ -763,19 +777,34 @@ static void musb_rx_packet_complete(USBPacket *packey, void *opaque)
     /* TODO: check len for over/underruns of an OUT packet?  */
     /* TODO: perhaps make use of e->ext_size[1] here.  */
 
-    packey->len = ep->status[1];
+    packey->result = ep->status[1];
 
     if (!(ep->csr[1] & (MGC_M_RXCSR_H_RXSTALL | MGC_M_RXCSR_DATAERROR))) {
         ep->csr[1] |= MGC_M_RXCSR_FIFOFULL | MGC_M_RXCSR_RXPKTRDY;
         if (!epnum)
             ep->csr[0] |= MGC_M_CSR0_RXPKTRDY;
 
-        ep->rxcount = packey->len; /* XXX: MIN(packey->len, ep->maxp[1]); */
+        ep->rxcount = packey->result; /* XXX: MIN(packey->len, ep->maxp[1]); */
         /* In DMA mode: assert DMA request for this EP */
     }
 
     /* Only if DMA has not been asserted */
     musb_rx_intr_set(s, epnum, 1);
+}
+
+static void musb_async_cancel_device(MUSBState *s, USBDevice *dev)
+{
+    int ep, dir;
+
+    for (ep = 0; ep < 16; ep++) {
+        for (dir = 0; dir < 2; dir++) {
+            if (s->ep[ep].packey[dir].p.owner != dev) {
+                continue;
+            }
+            usb_cancel_packet(&s->ep[ep].packey[dir].p);
+            /* status updates needed here? */
+        }
+    }
 }
 
 static void musb_tx_rdy(MUSBState *s, int epnum)
@@ -827,12 +856,12 @@ static void musb_rx_req(MUSBState *s, int epnum)
      * 64 bytes of the FIFO, only move the FIFO start and return. (Obsolete) */
     if (ep->packey[1].p.pid == USB_TOKEN_IN && ep->status[1] >= 0 &&
                     (ep->fifostart[1]) + ep->rxcount <
-                    ep->packey[1].p.len) {
+                    ep->packey[1].p.iov.size) {
         TRACE("0x%08x, %d",  ep->fifostart[1], ep->rxcount );
         ep->fifostart[1] += ep->rxcount;
         ep->fifolen[1] = 0;
 
-        ep->rxcount = MIN(ep->packey[0].p.len - (ep->fifostart[1]),
+        ep->rxcount = MIN(ep->packey[0].p.iov.size - (ep->fifostart[1]),
                         ep->maxp[1]);
 
         ep->csr[1] &= ~MGC_M_RXCSR_H_REQPKT;

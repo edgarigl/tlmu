@@ -130,7 +130,7 @@ CPUState *uc32_cpu_init(const char *cpu_model);
 int uc32_cpu_exec(CPUState *s);
 int uc32_cpu_signal_handler(int host_signum, void *pinfo, void *puc);
 int uc32_cpu_handle_mmu_fault(CPUState *env, target_ulong address, int rw,
-                              int mmu_idx, int is_softmuu);
+                              int mmu_idx);
 
 #define CPU_SAVE_VERSION 2
 
@@ -178,5 +178,11 @@ static inline void cpu_get_tb_cpu_state(CPUState *env, target_ulong *pc,
 void uc32_translate_init(void);
 void do_interrupt(CPUState *);
 void switch_mode(CPUState_UniCore32 *, int);
+
+static inline bool cpu_has_work(CPUState *env)
+{
+    return env->interrupt_request &
+        (CPU_INTERRUPT_HARD | CPU_INTERRUPT_EXITTB);
+}
 
 #endif /* __CPU_UC32_H__ */

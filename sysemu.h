@@ -34,6 +34,9 @@ void qemu_del_vm_change_state_handler(VMChangeStateEntry *e);
 #define VMSTOP_LOADVM    7
 #define VMSTOP_MIGRATE   8
 
+#define VMRESET_SILENT   false
+#define VMRESET_REPORT   true
+
 void vm_start(void);
 void vm_stop(int reason);
 
@@ -50,7 +53,7 @@ int qemu_powerdown_requested(void);
 void qemu_system_killed(int signal, pid_t pid);
 void qemu_kill_report(void);
 extern qemu_irq qemu_system_powerdown;
-void qemu_system_reset(void);
+void qemu_system_reset(bool report);
 
 void qemu_add_exit_notifier(Notifier *notify);
 void qemu_remove_exit_notifier(Notifier *notify);
@@ -120,6 +123,9 @@ extern int no_shutdown;
 extern int semihosting_enabled;
 extern int old_param;
 extern int boot_menu;
+extern uint8_t *boot_splash_filedata;
+extern int boot_splash_filedata_size;
+extern uint8_t qemu_extra_params_fw[2];
 extern QEMUClock *rtc_clock;
 
 #define MAX_NODES 64

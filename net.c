@@ -150,16 +150,21 @@ void qemu_macaddr_default_if_unset(MACAddr *macaddr)
 static char *assign_name(VLANClientState *vc1, const char *model)
 {
     VLANState *vlan;
+    VLANClientState *vc;
     char buf[256];
     int id = 0;
 
     QTAILQ_FOREACH(vlan, &vlans, next) {
-        VLANClientState *vc;
-
         QTAILQ_FOREACH(vc, &vlan->clients, next) {
             if (vc != vc1 && strcmp(vc->model, model) == 0) {
                 id++;
             }
+        }
+    }
+
+    QTAILQ_FOREACH(vc, &non_vlan_clients, next) {
+        if (vc != vc1 && strcmp(vc->model, model) == 0) {
+            id++;
         }
     }
 
@@ -653,6 +658,8 @@ VLANClientState *qemu_find_netdev(const char *id)
     VLANClientState *vc;
 
     QTAILQ_FOREACH(vc, &non_vlan_clients, next) {
+        if (vc->info->type == NET_CLIENT_TYPE_NIC)
+            continue;
         if (!strcmp(vc->name, id)) {
             return vc;
         }
@@ -710,7 +717,7 @@ int qemu_find_nic_model(NICInfo *nd, const char * const *models,
             return i;
     }
 
-    error_report("qemu: Unsupported NIC model: %s", nd->model);
+    error_report("Unsupported NIC model: %s", nd->model);
     return -1;
 }
 
@@ -776,18 +783,12 @@ static int net_init_nic(QemuOpts *opts,
         nd->devaddr = qemu_strdup(qemu_opt_get(opts, "addr"));
     }
 
-    nd->macaddr[0] = 0x52;
-    nd->macaddr[1] = 0x54;
-    nd->macaddr[2] = 0x00;
-    nd->macaddr[3] = 0x12;
-    nd->macaddr[4] = 0x34;
-    nd->macaddr[5] = 0x56 + idx;
-
     if (qemu_opt_get(opts, "macaddr") &&
-        net_parse_macaddr(nd->macaddr, qemu_opt_get(opts, "macaddr")) < 0) {
+        net_parse_macaddr(nd->macaddr.a, qemu_opt_get(opts, "macaddr")) < 0) {
         error_report("invalid syntax for ethernet address");
         return -1;
     }
+    qemu_macaddr_default_if_unset(&nd->macaddr);
 
     nd->nvectors = qemu_opt_get_number(opts, "vectors",
                                        DEV_NVECTORS_UNSPECIFIED);
@@ -830,14 +831,15 @@ static const struct {
     const char *type;
     net_client_init_func init;
     QemuOptDesc desc[NET_MAX_DESC];
-} net_client_types[] = {
-    {
+} net_client_types[NET_CLIENT_TYPE_MAX] = {
+    [NET_CLIENT_TYPE_NONE] = {
         .type = "none",
         .desc = {
             NET_COMMON_PARAMS_DESC,
             { /* end of list */ }
         },
-    }, {
+    },
+    [NET_CLIENT_TYPE_NIC] = {
         .type = "nic",
         .init = net_init_nic,
         .desc = {
@@ -866,8 +868,9 @@ static const struct {
             },
             { /* end of list */ }
         },
+    },
 #ifdef CONFIG_SLIRP
-    }, {
+    [NET_CLIENT_TYPE_USER] = {
         .type = "user",
         .init = net_init_slirp,
         .desc = {
@@ -927,8 +930,9 @@ static const struct {
             },
             { /* end of list */ }
         },
+    },
 #endif
-    }, {
+    [NET_CLIENT_TYPE_TAP] = {
         .type = "tap",
         .init = net_init_tap,
         .desc = {
@@ -975,7 +979,8 @@ static const struct {
 #endif /* _WIN32 */
             { /* end of list */ }
         },
-    }, {
+    },
+    [NET_CLIENT_TYPE_SOCKET] = {
         .type = "socket",
         .init = net_init_socket,
         .desc = {
@@ -1003,8 +1008,9 @@ static const struct {
             },
             { /* end of list */ }
         },
+    },
 #ifdef CONFIG_VDE
-    }, {
+    [NET_CLIENT_TYPE_VDE] = {
         .type = "vde",
         .init = net_init_vde,
         .desc = {
@@ -1028,8 +1034,9 @@ static const struct {
             },
             { /* end of list */ }
         },
+    },
 #endif
-    }, {
+    [NET_CLIENT_TYPE_DUMP] = {
         .type = "dump",
         .init = net_init_dump,
         .desc = {
@@ -1046,7 +1053,6 @@ static const struct {
             { /* end of list */ }
         },
     },
-    { /* end of list */ }
 };
 
 int net_client_init(Monitor *mon, QemuOpts *opts, int is_netdev)
@@ -1094,8 +1100,9 @@ int net_client_init(Monitor *mon, QemuOpts *opts, int is_netdev)
         name = qemu_opt_get(opts, "name");
     }
 
-    for (i = 0; net_client_types[i].type != NULL; i++) {
-        if (!strcmp(net_client_types[i].type, type)) {
+    for (i = 0; i < NET_CLIENT_TYPE_MAX; i++) {
+        if (net_client_types[i].type != NULL &&
+            !strcmp(net_client_types[i].type, type)) {
             VLANState *vlan = NULL;
             int ret;
 
@@ -1212,7 +1219,7 @@ int do_netdev_del(Monitor *mon, const QDict *qdict, QObject **ret_data)
     VLANClientState *vc;
 
     vc = qemu_find_netdev(id);
-    if (!vc || vc->info->type == NET_CLIENT_TYPE_NIC) {
+    if (!vc) {
         qerror_report(QERR_DEVICE_NOT_FOUND, id);
         return -1;
     }
@@ -1221,25 +1228,38 @@ int do_netdev_del(Monitor *mon, const QDict *qdict, QObject **ret_data)
     return 0;
 }
 
+static void print_net_client(Monitor *mon, VLANClientState *vc)
+{
+    monitor_printf(mon, "%s: type=%s,%s\n", vc->name,
+                   net_client_types[vc->info->type].type, vc->info_str);
+}
+
 void do_info_network(Monitor *mon)
 {
     VLANState *vlan;
-    VLANClientState *vc;
+    VLANClientState *vc, *peer;
+    net_client_type type;
 
     QTAILQ_FOREACH(vlan, &vlans, next) {
         monitor_printf(mon, "VLAN %d devices:\n", vlan->id);
 
         QTAILQ_FOREACH(vc, &vlan->clients, next) {
-            monitor_printf(mon, "  %s: %s\n", vc->name, vc->info_str);
+            monitor_printf(mon, "  ");
+            print_net_client(mon, vc);
         }
     }
     monitor_printf(mon, "Devices not on any VLAN:\n");
     QTAILQ_FOREACH(vc, &non_vlan_clients, next) {
-        monitor_printf(mon, "  %s: %s", vc->name, vc->info_str);
-        if (vc->peer) {
-            monitor_printf(mon, " peer=%s", vc->peer->name);
+        peer = vc->peer;
+        type = vc->info->type;
+        if (!peer || type == NET_CLIENT_TYPE_NIC) {
+            monitor_printf(mon, "  ");
+            print_net_client(mon, vc);
+        } /* else it's a netdev connected to a NIC, printed with the NIC */
+        if (peer && type == NET_CLIENT_TYPE_NIC) {
+            monitor_printf(mon, "   \\ ");
+            print_net_client(mon, peer);
         }
-        monitor_printf(mon, "\n");
     }
 }
 
@@ -1257,7 +1277,11 @@ int do_set_link(Monitor *mon, const QDict *qdict, QObject **ret_data)
             }
         }
     }
-    vc = qemu_find_netdev(name);
+    QTAILQ_FOREACH(vc, &non_vlan_clients, next) {
+        if (!strcmp(vc->name, name)) {
+            goto done;
+        }
+    }
 done:
 
     if (!vc) {
@@ -1304,18 +1328,15 @@ void net_check_clients(void)
 {
     VLANState *vlan;
     VLANClientState *vc;
-    int seen_nics = 0;
+    int i;
 
     /* Don't warn about the default network setup that you get if
-     * no command line -net options are specified. There are two
-     * cases that we would otherwise complain about:
+     * no command line -net or -netdev options are specified. There
+     * are two cases that we would otherwise complain about:
      * (1) board doesn't support a NIC but the implicit "-net nic"
-     * requested one; we'd otherwise complain about more NICs being
-     * specified than we support, and also that the vlan set up by
-     * the implicit "-net user" didn't have any NICs connected to it
-     * (2) CONFIG_SLIRP not set: we'd otherwise complain about the
-     * implicit "-net nic" setting up a nic that wasn't connected to
-     * anything.
+     * requested one
+     * (2) CONFIG_SLIRP not set, in which case the implicit "-net nic"
+     * sets up a nic that isn't connected to anything.
      */
     if (default_net) {
         return;
@@ -1327,10 +1348,9 @@ void net_check_clients(void)
         QTAILQ_FOREACH(vc, &vlan->clients, next) {
             switch (vc->info->type) {
             case NET_CLIENT_TYPE_NIC:
-                seen_nics++;
                 has_nic = 1;
                 break;
-            case NET_CLIENT_TYPE_SLIRP:
+            case NET_CLIENT_TYPE_USER:
             case NET_CLIENT_TYPE_TAP:
             case NET_CLIENT_TYPE_SOCKET:
             case NET_CLIENT_TYPE_VDE:
@@ -1347,25 +1367,25 @@ void net_check_clients(void)
                     vlan->id);
     }
     QTAILQ_FOREACH(vc, &non_vlan_clients, next) {
-        if (vc->info->type == NET_CLIENT_TYPE_NIC) {
-            seen_nics++;
-        }
         if (!vc->peer) {
             fprintf(stderr, "Warning: %s %s has no peer\n",
                     vc->info->type == NET_CLIENT_TYPE_NIC ? "nic" : "netdev",
                     vc->name);
         }
     }
-    if (seen_nics != nb_nics) {
-        /* Number of NICs requested by user on command line doesn't match
-         * the number the model actually registered with us.
-         * This will generally only happen for models of embedded boards
-         * with no PCI bus or similar. PCI based machines can instantiate
-         * all requested NICs as PCI devices but usually embedded boards
-         * only have a single NIC.
-         */
-        fprintf(stderr, "Warning: more nics requested than this machine "
-                "supports; some have been ignored\n");
+
+    /* Check that all NICs requested via -net nic actually got created.
+     * NICs created via -device don't need to be checked here because
+     * they are always instantiated.
+     */
+    for (i = 0; i < MAX_NICS; i++) {
+        NICInfo *nd = &nd_table[i];
+        if (nd->used && !nd->instantiated) {
+            fprintf(stderr, "Warning: requested NIC (%s, model %s) "
+                    "was not created (not supported by this machine?)\n",
+                    nd->name ? nd->name : "anonymous",
+                    nd->model ? nd->model : "unspecified");
+        }
     }
 }
 

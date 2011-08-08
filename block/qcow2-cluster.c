@@ -697,12 +697,12 @@ err:
  * m->depends_on is set to NULL and the other fields in m are meaningless.
  *
  * If the cluster is newly allocated, m->nb_clusters is set to the number of
- * contiguous clusters that have been allocated. This may be 0 if the request
- * conflict with another write request in flight; in this case, m->depends_on
- * is set and the remaining fields of m are meaningless.
+ * contiguous clusters that have been allocated. In this case, the other
+ * fields of m are valid and contain information about the first allocated
+ * cluster.
  *
- * If m->nb_clusters is non-zero, the other fields of m are valid and contain
- * information about the first allocated cluster.
+ * If the request conflicts with another write request in flight, the coroutine
+ * is queued and will be reentered when the dependency has completed.
  *
  * Return 0 on success and -errno in error cases
  */
@@ -721,6 +721,7 @@ int qcow2_alloc_cluster_offset(BlockDriverState *bs, uint64_t offset,
         return ret;
     }
 
+again:
     nb_clusters = size_to_clusters(s, n_end << 9);
 
     nb_clusters = MIN(nb_clusters, s->l2_size - l2_index);
@@ -792,12 +793,12 @@ int qcow2_alloc_cluster_offset(BlockDriverState *bs, uint64_t offset,
             }
 
             if (nb_clusters == 0) {
-                /* Set dependency and wait for a callback */
-                m->depends_on = old_alloc;
-                m->nb_clusters = 0;
-                *num = 0;
-                ret = 0;
-                goto fail;
+                /* Wait for the dependency to complete. We need to recheck
+                 * the free/allocated clusters when we continue. */
+                qemu_co_mutex_unlock(&s->lock);
+                qemu_co_queue_wait(&old_alloc->dependent_requests);
+                qemu_co_mutex_lock(&s->lock);
+                goto again;
             }
         }
     }
@@ -812,7 +813,6 @@ int qcow2_alloc_cluster_offset(BlockDriverState *bs, uint64_t offset,
 
     cluster_offset = qcow2_alloc_clusters(bs, nb_clusters * s->cluster_size);
     if (cluster_offset < 0) {
-        QLIST_REMOVE(m, next_in_flight);
         ret = cluster_offset;
         goto fail;
     }
@@ -825,7 +825,7 @@ int qcow2_alloc_cluster_offset(BlockDriverState *bs, uint64_t offset,
 out:
     ret = qcow2_cache_put(bs, s->l2_table_cache, (void**) &l2_table);
     if (ret < 0) {
-        return ret;
+        goto fail_put;
     }
 
     m->nb_available = MIN(nb_clusters << (s->cluster_bits - 9), n_end);
@@ -837,6 +837,8 @@ out:
 
 fail:
     qcow2_cache_put(bs, s->l2_table_cache, (void**) &l2_table);
+fail_put:
+    QLIST_REMOVE(m, next_in_flight);
     return ret;
 }
 

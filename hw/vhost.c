@@ -120,7 +120,6 @@ static void vhost_dev_unassign_memory(struct vhost_dev *dev,
         if (start_addr <= reg->guest_phys_addr && memlast >= reglast) {
             --dev->mem->nregions;
             --to;
-            assert(to >= 0);
             ++overlap_middle;
             continue;
         }
@@ -784,5 +783,6 @@ void vhost_dev_stop(struct vhost_dev *hdev, VirtIODevice *vdev)
 
     hdev->started = false;
     qemu_free(hdev->log);
+    hdev->log = NULL;
     hdev->log_size = 0;
 }

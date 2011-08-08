@@ -309,7 +309,7 @@ static inline int cpu_mmu_index (CPUState *env)
 }
 
 int cpu_mb_handle_mmu_fault(CPUState *env, target_ulong address, int rw,
-                            int mmu_idx, int is_softmmu);
+                            int mmu_idx);
 #define cpu_handle_mmu_fault cpu_mb_handle_mmu_fault
 
 #if defined(CONFIG_USER_ONLY)
@@ -347,7 +347,20 @@ static inline void cpu_get_tb_cpu_state(CPUState *env, target_ulong *pc,
 }
 
 #if !defined(CONFIG_USER_ONLY)
-void do_unassigned_access(target_phys_addr_t addr, int is_write, int is_exec,
-                          int is_asi, int size);
+void cpu_unassigned_access(CPUState *env1, target_phys_addr_t addr,
+                           int is_write, int is_exec, int is_asi, int size);
 #endif
+
+static inline bool cpu_has_work(CPUState *env)
+{
+    return env->interrupt_request & (CPU_INTERRUPT_HARD | CPU_INTERRUPT_NMI);
+}
+
+#include "exec-all.h"
+
+static inline void cpu_pc_from_tb(CPUState *env, TranslationBlock *tb)
+{
+    env->sregs[SR_PC] = tb->pc;
+}
+
 #endif

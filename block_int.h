@@ -27,6 +27,7 @@
 #include "block.h"
 #include "qemu-option.h"
 #include "qemu-queue.h"
+#include "qemu-coroutine.h"
 
 #define BLOCK_FLAG_ENCRYPT	1
 #define BLOCK_FLAG_COMPAT6	4
@@ -39,6 +40,7 @@
 #define BLOCK_OPT_CLUSTER_SIZE  "cluster_size"
 #define BLOCK_OPT_TABLE_SIZE    "table_size"
 #define BLOCK_OPT_PREALLOC      "preallocation"
+#define BLOCK_OPT_SUBFMT        "subformat"
 
 typedef struct AIOPool {
     void (*cancel)(BlockDriverAIOCB *acb);
@@ -76,6 +78,11 @@ struct BlockDriver {
     int (*bdrv_discard)(BlockDriverState *bs, int64_t sector_num,
                         int nb_sectors);
 
+    int coroutine_fn (*bdrv_co_readv)(BlockDriverState *bs,
+        int64_t sector_num, int nb_sectors, QEMUIOVector *qiov);
+    int coroutine_fn (*bdrv_co_writev)(BlockDriverState *bs,
+        int64_t sector_num, int nb_sectors, QEMUIOVector *qiov);
+
     int (*bdrv_aio_multiwrite)(BlockDriverState *bs, BlockRequest *reqs,
         int num_reqs);
     int (*bdrv_merge_requests)(BlockDriverState *bs, BlockRequest* a,
@@ -85,6 +92,7 @@ struct BlockDriver {
     const char *protocol_name;
     int (*bdrv_truncate)(BlockDriverState *bs, int64_t offset);
     int64_t (*bdrv_getlength)(BlockDriverState *bs);
+    int64_t (*bdrv_get_allocated_file_size)(BlockDriverState *bs);
     int (*bdrv_write_compressed)(BlockDriverState *bs, int64_t sector_num,
                                  const uint8_t *buf, int nb_sectors);
 
@@ -110,8 +118,8 @@ struct BlockDriver {
     /* removable device specific */
     int (*bdrv_is_inserted)(BlockDriverState *bs);
     int (*bdrv_media_changed)(BlockDriverState *bs);
-    int (*bdrv_eject)(BlockDriverState *bs, int eject_flag);
-    int (*bdrv_set_locked)(BlockDriverState *bs, int locked);
+    void (*bdrv_eject)(BlockDriverState *bs, int eject_flag);
+    void (*bdrv_set_locked)(BlockDriverState *bs, int locked);
 
     /* to control generic scsi devices */
     int (*bdrv_ioctl)(BlockDriverState *bs, unsigned long int req, void *buf);
@@ -203,8 +211,8 @@ struct BlockDriverState {
     void *private;
 };
 
-#define CHANGE_MEDIA	0x01
-#define CHANGE_SIZE	0x02
+#define CHANGE_MEDIA    0x01
+#define CHANGE_SIZE     0x02
 
 struct BlockDriverAIOCB {
     AIOPool *pool;
