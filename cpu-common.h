@@ -83,8 +83,6 @@ void qemu_ram_remap(ram_addr_t addr, ram_addr_t length);
 /* This should only be used for ram local to a device.  */
 void *qemu_get_ram_ptr(ram_addr_t addr);
 void *qemu_get_ram_base_ptr(ram_addr_t addr);
-// ED FIXME: Replace with qemu_ram_ptr_length.
-int qemu_get_ram_len(ram_addr_t addr);
 void *qemu_map_paddr_to_host(target_phys_addr_t *paddr_p, int64_t *len);
 TLM_RAMBlock *qemu_get_ram_tlmblock(ram_addr_t addr);
 void *qemu_ram_ptr_length(ram_addr_t addr, ram_addr_t *size);
