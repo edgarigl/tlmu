@@ -25,11 +25,13 @@
 #define SC_INCLUDE_DYNAMIC_PROCESSES
 
 #include <inttypes.h>
+#include <sys/utsname.h>
 
 #include "systemc.h"
 #include "tlm_utils/simple_initiator_socket.h"
 #include "tlm_utils/simple_target_socket.h"
 #include "tlm_utils/tlm_quantumkeeper.h"
+#include <iostream>
 
 #include "tlmu_sc.h"
 
@@ -72,7 +74,7 @@ tlmu_sc::tlmu_sc(sc_module_name name, const char *soname,
 	speed_factor /= freq_hz;
 	last_sync = 0;
 
-	tlmu_init(&q, name);
+	tlmu_init(&q, this->name());
 
 	err = tlmu_load(&q, soname);
 	if (err) {
@@ -329,6 +331,20 @@ void tlmu_sc::sleep(void)
 void tlmu_sc::append_arg(const char *newarg)
 {
 	tlmu_append_arg(&q, newarg);
+}
+
+void tlmu_sc::gdb(const char *gdb_conn, bool wait_for_gdb_at_start)
+{
+	std::ostringstream os;
+	struct utsname uts;
+	uname(&uts);
+	os << name() << ": gdb connection created on "
+	   << gdb_conn << " @" << uts.nodename;
+	SC_REPORT_INFO("tlmu", os.str().c_str());
+	tlmu_append_arg(&q, "-gdb");
+	tlmu_append_arg(&q, gdb_conn);
+	if (wait_for_gdb_at_start)
+		tlmu_append_arg(&q, "-S");
 }
 
 void tlmu_sc::process(void)

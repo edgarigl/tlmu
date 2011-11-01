@@ -62,6 +62,7 @@ public:
 	void map_ram(const char *name, uint64_t base, uint64_t size, int rw);
 	void set_image_load_params(uint64_t base, uint64_t size);
 	void append_arg(const char *newarg);
+	void gdb(const char *gdb_conn, bool wait_for_gdb_at_start=true);
 
 	void wake(void);
 	void sleep(void);
