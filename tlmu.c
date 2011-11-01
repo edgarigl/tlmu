@@ -217,23 +217,30 @@ static void copylib(const char *path, const char *newpath)
 	void *handle;
 	void *addr;
 	int ret;
+	struct stat stb;
 
-	handle = dlopen(path, RTLD_LOCAL | RTLD_DEEPBIND | RTLD_NOW);
-	if (!handle) {
-		perror("path");
-		goto err;
+	if (stat(path, &stb) == 0) {
+		/* If the path exists, use it directly */
+		ld_path = strdup(path);
+	} else {
+		/* Otherwise, use dlopen to find path */
+		handle = dlopen(path, RTLD_LOCAL | RTLD_DEEPBIND | RTLD_NOW);
+		if (!handle) {
+			perror("path");
+			goto err;
+		}
+
+		addr = dlsym(handle, "vl_main");
+		ret = dladdr(addr, &info);
+		if (!ret) {
+			perror("dladdr");
+			fprintf(stderr, "vl_main doesn't exist in TLMu??\n");
+			goto err;
+		}
+
+		ld_path = strdup(info.dli_fname);
+		dlclose(handle);
 	}
-
-	addr = dlsym(handle, "vl_main");
-	ret = dladdr(addr, &info);
-	if (!ret) {
-		perror("dladdr");
-		fprintf(stderr, "vl_main doesn't exist in TLMu??\n");
-		goto err;
-	}
-
-	ld_path = strdup(info.dli_fname);
-	dlclose(handle);
 
 	/* Now copy it into our per instance store.  */
 	s = open(ld_path, O_RDONLY);
