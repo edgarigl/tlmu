@@ -34,6 +34,7 @@
 #include <time.h>
 #include <errno.h>
 #include <assert.h>
+#include <libgen.h>
 
 #include <pthread.h>
 
@@ -276,12 +277,17 @@ int tlmu_load(struct tlmu *q, const char *soname)
 {
 	char *libname;
 	char *logname;
+	char *sobasename;
+	char *socopy;
 	int err = 0;
 	int n;
 
 	mkdir(".tlmu", S_IRWXU | S_IRWXG);
 
-	n = asprintf(&libname, ".tlmu/%s-%s", soname, q->name);
+	socopy = strdup(soname);
+	sobasename = basename(socopy);
+
+	n = asprintf(&libname, ".tlmu/%s-%s", sobasename, q->name);
 	copylib(soname, libname);
 
 	q->dl_handle = dlopen(libname, RTLD_LOCAL | RTLD_DEEPBIND | RTLD_NOW);
@@ -290,8 +296,10 @@ int tlmu_load(struct tlmu *q, const char *soname)
 		perror(libname);
 	}
 	free(libname);
-	if (!q->dl_handle)
+	if (!q->dl_handle) {
+		free(socopy);
 		return 1;
+	}
 
 	q->main = dlsym(q->dl_handle, "vl_main");
 	q->tlm_set_log_filename = dlsym(q->dl_handle, "cpu_set_log_filename");
@@ -330,12 +338,15 @@ int tlmu_load(struct tlmu *q, const char *soname)
 		|| !q->tlm_get_dmi_ptr_cb
 		|| !q->tlm_get_dmi_ptr) {
 		dlclose(q->dl_handle);
+		free(socopy);
 		return 1;
 	}
 
-	n = asprintf(&logname, ".tlmu/%s-%s.log", soname, q->name);
+	n = asprintf(&logname, ".tlmu/%s-%s.log", sobasename, q->name);
 	tlmu_set_log_filename(q, logname);
 	free(logname);
+
+	free(socopy);
 	return 0;
 }
 
