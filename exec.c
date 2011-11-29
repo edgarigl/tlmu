@@ -3337,6 +3337,26 @@ int qemu_ram_addr_from_host(void *ptr, ram_addr_t *ram_addr)
     return -1;
 }
 
+int qemu_ram_addr_from_tlmram(void *ptr, ram_addr_t *ram_addr)
+{
+    RAMBlock *block;
+    uint8_t *host = ptr;
+
+    if (xen_enabled()) {
+        *ram_addr = xen_ram_addr_from_mapcache(ptr);
+        return 0;
+    }
+
+    QLIST_FOREACH(block, &ram_list.blocks, next) {
+        if (host - block->host < block->length) {
+            *ram_addr = block->offset + (host - block->host);
+            return 0;
+        }
+    }
+
+    return -1;
+}
+
 /* Some of the softmmu routines need to translate from a host pointer
    (typically a TLB entry) back to a ram offset.  */
 ram_addr_t qemu_ram_addr_from_host_nofail(void *ptr)
@@ -3344,6 +3364,19 @@ ram_addr_t qemu_ram_addr_from_host_nofail(void *ptr)
     ram_addr_t ram_addr;
 
     if (qemu_ram_addr_from_host(ptr, &ram_addr)) {
+        fprintf(stderr, "Bad ram pointer %p\n", ptr);
+        abort();
+    }
+    return ram_addr;
+}
+
+/* Some of the softmmu routines need to translate from a host pointer
+   (typically a TLB entry) back to a ram offset.  */
+ram_addr_t qemu_ram_addr_from_tlmram_nofail(void *ptr)
+{
+    ram_addr_t ram_addr;
+
+    if (qemu_ram_addr_from_tlmram(ptr, &ram_addr)) {
         fprintf(stderr, "Bad ram pointer %p\n", ptr);
         abort();
     }

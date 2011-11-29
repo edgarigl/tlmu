@@ -330,7 +330,7 @@ static inline tb_page_addr_t get_page_addr_code(CPUState *env1, target_ulong add
          paddr >>= IO_MEM_SHIFT;
          paddr &= (IO_MEM_NB_ENTRIES - 1);
          if (mmio && tlm_iodev_is_ram(paddr)) {
-             return qemu_ram_addr_from_host_nofail((void *)(unsigned long)addr);
+             return qemu_ram_addr_from_tlmram_nofail((void *)(unsigned long)addr);
          } else {
              cpu_abort(env1, "Trying to execute code outside RAM or ROM at 0x"
                               TARGET_FMT_lx "\n", addr);

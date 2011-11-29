@@ -93,6 +93,9 @@ void qemu_put_ram_ptr(void *addr);
 /* This should not be used by devices.  */
 int qemu_ram_addr_from_host(void *ptr, ram_addr_t *ram_addr);
 ram_addr_t qemu_ram_addr_from_host_nofail(void *ptr);
+int qemu_ram_addr_from_tlmram(void *ptr, ram_addr_t *ram_addr);
+ram_addr_t qemu_ram_addr_from_tlmram_nofail(void *ptr);
+
 
 int cpu_register_io_memory(CPUReadMemoryFunc * const *mem_read,
                            CPUWriteMemoryFunc * const *mem_write,
