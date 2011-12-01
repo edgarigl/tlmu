@@ -10,7 +10,8 @@
  */
 static inline void tlm_map(CPUState *env, uint64_t addr, uint64_t size,
                            uint64_t sync_period_ns,
-                           qemu_irq *cpu_irq, uint32_t nr_irq)
+                           qemu_irq *cpu_irq, uint32_t nr_irq,
+                           int32_t *irq_vector)
 {
     int i;
 
@@ -21,6 +22,7 @@ static inline void tlm_map(CPUState *env, uint64_t addr, uint64_t size,
     qdev_prop_set_uint64(dev, "size", size);
     qdev_prop_set_uint64(dev, "sync_period_ns", sync_period_ns);
     qdev_prop_set_uint32(dev, "nr_irq", nr_irq);
+    qdev_prop_set_ptr(dev, "irq_vector", irq_vector);
     qdev_init_nofail(dev);
     sysbus_mmio_map(sysbus_from_qdev(dev), 0, addr);
     for (i = 0; i < nr_irq; i++) {

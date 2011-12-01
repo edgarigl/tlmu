@@ -75,6 +75,14 @@ void notdirty_mem_wr(target_phys_addr_t ram_addr, int len);
 static void tlm_write_irq(struct tlmu_irq *qirq)
 {
     assert(main_tlmdev);
+
+    if ((qirq->addr / 4) > main_tlmdev->nr_irq) {
+       /* This is a write to the vector.  */
+       if (main_tlmdev->irq_vector) {
+           * (uint32_t *) main_tlmdev->irq_vector = qirq->data;
+       }
+    }
+
     main_tlmdev->pending_irq[qirq->addr / 4] = qirq->data;
     qemu_bh_schedule(main_tlmdev->irq_bh);
 }
