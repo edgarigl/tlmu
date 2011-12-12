@@ -46,8 +46,8 @@ tlmu_sc::tlmu_sc(sc_module_name name, const char *soname,
 			int tracing,
 			const char *gdb_conn,
 			int boot_state,
-			uint64_t sync_period_ns)
-        : sc_module(name),
+			int64_t sync_period_ns)
+	: sc_module(name),
 	  from_tlmu_sk("fromTLMuSocket"),
 	  to_tlmu_sk("toTLMuSocket"),
 	  to_tlmu_irq_sk("toTLMuIRQSocket"),
@@ -55,10 +55,11 @@ tlmu_sc::tlmu_sc(sc_module_name name, const char *soname,
 	  cpu_model(cpu_model),
 	  elf_filename(elf_filename),
 	  tracing(tracing),
-	  gdb_conn(gdb_conn)
+	  gdb_conn(gdb_conn),
+	  is_running(false)
 {
 	int err;
-	
+
 	from_tlmu_sk.register_invalidate_direct_mem_ptr(this,
 			&tlmu_sc::invalidate_direct_mem_ptr);
 
@@ -82,6 +83,12 @@ tlmu_sc::tlmu_sc(sc_module_name name, const char *soname,
 		exit(1);
 	}
 	tlmu_set_opaque(&q, this);
+	if (sync_period_ns<0) {
+		use_global_quantum = true;
+		sync_period_ns = 100*1000;
+	} else {
+		use_global_quantum = false;
+	}
 	tlmu_set_sync_period_ns(&q, sync_period_ns);
 	tlmu_set_bus_access_cb(&q, &tlmu_sc::bus_access);
 	tlmu_set_bus_access_dbg_cb(&q, &tlmu_sc::bus_access_dbg);
@@ -305,6 +312,7 @@ void tlmu_sc::irq_b_transport(tlm::tlm_generic_payload& trans, sc_time& delay)
 
 void tlmu_sc::map_ram(const char *name, uint64_t base, uint64_t size, int rw)
 {
+	sc_assert(!is_running);
 	tlmu_map_ram(&q, name, base, size, rw);
 }
 
@@ -320,21 +328,25 @@ void tlmu_sc::sync(int64_t time_ns)
 
 void tlmu_sc::wake(void)
 {
+	this->wait_started();
 	tlmu_notify_event(&q, TLMU_TLM_EVENT_WAKE, NULL);
 }
 
 void tlmu_sc::sleep(void)
 {
+	this->wait_started();
 	tlmu_notify_event(&q, TLMU_TLM_EVENT_SLEEP, NULL);
 }
 
 void tlmu_sc::append_arg(const char *newarg)
 {
+	sc_assert(!is_running);
 	tlmu_append_arg(&q, newarg);
 }
 
 void tlmu_sc::gdb(const char *gdb_conn, bool wait_for_gdb_at_start)
 {
+	sc_assert(!is_running);
 	std::ostringstream os;
 	struct utsname uts;
 	uname(&uts);
@@ -347,8 +359,23 @@ void tlmu_sc::gdb(const char *gdb_conn, bool wait_for_gdb_at_start)
 		tlmu_append_arg(&q, "-S");
 }
 
+void tlmu_sc::wait_started() {
+	if (!is_running) {
+		wait(start);
+	}
+}
+
 void tlmu_sc::process(void)
 {
+	if (use_global_quantum) {
+		sc_dt::uint64 gq = (m_qk.get_global_quantum().value() /
+				    sc_time(1, SC_NS).value());
+		tlmu_set_sync_period_ns(&q, gq);
+		std::ostringstream os;
+		os << name() << ": setting sync period to " << gq << " ns";
+		SC_REPORT_INFO("tlmu", os.str().c_str());
+	}
+
 	tlmu_append_arg(&q, "-cpu");
 	tlmu_append_arg(&q, cpu_model);
 
@@ -385,6 +412,7 @@ void tlmu_sc::process(void)
 		tlmu_append_arg(&q, "-gdb");
 		tlmu_append_arg(&q, gdb_conn);
 	}
-
+	is_running = true;
+	start.notify();
 	tlmu_run(&q);
 }

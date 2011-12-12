@@ -57,7 +57,7 @@ public:
 		 int tracing,
 		 const char *gdb_conn,
 		 int boot_state,
-		 uint64_t sync_period_ns);
+		 int64_t sync_period_ns=-1);
 
 	void map_ram(const char *name, uint64_t base, uint64_t size, int rw);
 	void set_image_load_params(uint64_t base, uint64_t size);
@@ -77,7 +77,10 @@ private:
 	int tracing;
 	const char *gdb_conn;
 	const char *bootsel;
+	bool use_global_quantum;  // set sync_period to global quantum
 	struct tlmu q;
+	bool is_running;
+	sc_core::sc_event start;
 
 	virtual void invalidate_direct_mem_ptr(sc_dt::uint64 start_range,
 					sc_dt::uint64 end_range);
@@ -89,6 +92,7 @@ private:
 	virtual unsigned int to_tlmu_transport_dbg(tlm::tlm_generic_payload& trans);
 	virtual void irq_b_transport(tlm::tlm_generic_payload& trans, sc_time& delay);
 	virtual unsigned int irq_transport_dbg(tlm::tlm_generic_payload& trans);
+	void wait_started();
 	void process(void);
 	void sync_time(int64_t tlmu_time_ns);
 	void get_dmi_ptr(uint64_t addr, struct tlmu_dmi *dmi);
