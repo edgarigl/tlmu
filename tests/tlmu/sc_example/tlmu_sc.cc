@@ -191,9 +191,10 @@ int tlmu_sc::bus_access(int64_t clk, int rw,
 	tr.set_dmi_allowed(false);
 	tr.set_response_status(tlm::TLM_INCOMPLETE_RESPONSE);
 
+	delay = m_qk.get_local_time();
 	from_tlmu_sk->b_transport(tr, delay);
 
-	m_qk.inc(delay);
+	m_qk.set(delay);
 	sync_time(clk);
 	return tr.is_dmi_allowed();
 }
