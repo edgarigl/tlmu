@@ -97,6 +97,10 @@ tlmu_sc::tlmu_sc(sc_module_name name, const char *soname,
 	tlmu_set_boot_state(&q, boot_state);
 
 	SC_THREAD(process);
+}
+
+void tlmu_sc::start_of_simulation(void)
+{
 	m_qk.reset();
 }
 

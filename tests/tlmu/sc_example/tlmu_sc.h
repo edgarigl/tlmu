@@ -93,6 +93,7 @@ private:
 	virtual void irq_b_transport(tlm::tlm_generic_payload& trans, sc_time& delay);
 	virtual unsigned int irq_transport_dbg(tlm::tlm_generic_payload& trans);
 	void wait_started();
+	void start_of_simulation(void);
 	void process(void);
 	void sync_time(int64_t tlmu_time_ns);
 	void get_dmi_ptr(uint64_t addr, struct tlmu_dmi *dmi);
