@@ -201,7 +201,7 @@ uint32_t tlm_read(struct TLMMemory *s, target_phys_addr_t addr, int len)
         offset = eaddr - s->dmi.base;
         p += offset;
         memcpy(&r, p, len);
-        qemu_icount += s->dmi.read_latency;
+        qemu_icount += s->dmi.read_latency * len;
         if (!s->is_ram) {
             clk = qemu_get_clock_ns(vm_clock);
             tlm_sync(tlm_opaque, clk);
@@ -238,7 +238,7 @@ tlm_write(struct TLMMemory *s, target_phys_addr_t addr, uint32_t value, int len)
         offset = eaddr - s->dmi.base;
         p += offset;
         memcpy(p, &value, len);
-        qemu_icount += s->dmi.write_latency;
+        qemu_icount += s->dmi.write_latency * len;
         if (!s->is_ram) {
             clk = qemu_get_clock_ns(vm_clock);
             tlm_sync(tlm_opaque, clk);
