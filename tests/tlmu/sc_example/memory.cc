@@ -83,8 +83,10 @@ bool memory::get_direct_mem_ptr(tlm::tlm_generic_payload& trans,
 	dmi_data.set_dmi_ptr( reinterpret_cast<unsigned char*>(&mem[0]));
 	dmi_data.set_start_address(0);
 	dmi_data.set_end_address(size - 1);
-	dmi_data.set_read_latency(LATENCY);
-	dmi_data.set_write_latency(LATENCY);
+	/* Latencies are per byte.  Our latency is expressed per access,
+	   which are in 32bits so dividie by 4. Is there a better way?.  */
+	dmi_data.set_read_latency(LATENCY / 4);
+	dmi_data.set_write_latency(LATENCY / 4);
 	return true;
 }
 
