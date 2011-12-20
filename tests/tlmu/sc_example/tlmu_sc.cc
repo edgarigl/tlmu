@@ -195,11 +195,13 @@ int tlmu_sc::bus_access(int64_t clk, int rw,
 	tr.set_dmi_allowed(false);
 	tr.set_response_status(tlm::TLM_INCOMPLETE_RESPONSE);
 
+	/* Sync the QEMU time with TLM to let the target see the elapsed
+	   time from CPU execution.  */
+	sync_time(clk);
 	delay = m_qk.get_local_time();
 	from_tlmu_sk->b_transport(tr, delay);
 
-	m_qk.set(delay);
-	sync_time(clk);
+	m_qk.set_and_sync(delay);
 	return tr.is_dmi_allowed();
 }
 
