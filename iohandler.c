@@ -67,7 +67,7 @@ int qemu_set_fd_handler2(int fd,
             if (ioh->fd == fd)
                 goto found;
         }
-        ioh = qemu_mallocz(sizeof(IOHandlerRecord));
+        ioh = g_malloc0(sizeof(IOHandlerRecord));
         QLIST_INSERT_HEAD(&io_handlers, ioh, next);
     found:
         ioh->fd = fd;
@@ -80,12 +80,67 @@ int qemu_set_fd_handler2(int fd,
     return 0;
 }
 
+typedef struct IOTrampoline
+{
+    GIOChannel *chan;
+    IOHandler *fd_read;
+    IOHandler *fd_write;
+    void *opaque;
+    guint tag;
+} IOTrampoline;
+
+static gboolean fd_trampoline(GIOChannel *chan, GIOCondition cond, gpointer opaque)
+{
+    IOTrampoline *tramp = opaque;
+
+    if (tramp->opaque == NULL) {
+        return FALSE;
+    }
+
+    if ((cond & G_IO_IN) && tramp->fd_read) {
+        tramp->fd_read(tramp->opaque);
+    }
+
+    if ((cond & G_IO_OUT) && tramp->fd_write) {
+        tramp->fd_write(tramp->opaque);
+    }
+
+    return TRUE;
+}
+
 int qemu_set_fd_handler(int fd,
                         IOHandler *fd_read,
                         IOHandler *fd_write,
                         void *opaque)
 {
-    return qemu_set_fd_handler2(fd, NULL, fd_read, fd_write, opaque);
+    static IOTrampoline fd_trampolines[FD_SETSIZE];
+    IOTrampoline *tramp = &fd_trampolines[fd];
+
+    if (tramp->tag != 0) {
+        g_io_channel_unref(tramp->chan);
+        g_source_remove(tramp->tag);
+    }
+
+    if (opaque) {
+        GIOCondition cond = 0;
+
+        tramp->fd_read = fd_read;
+        tramp->fd_write = fd_write;
+        tramp->opaque = opaque;
+
+        if (fd_read) {
+            cond |= G_IO_IN | G_IO_ERR;
+        }
+
+        if (fd_write) {
+            cond |= G_IO_OUT | G_IO_ERR;
+        }
+
+        tramp->chan = g_io_channel_unix_new(fd);
+        tramp->tag = g_io_add_watch(tramp->chan, cond, fd_trampoline, tramp);
+    }
+
+    return 0;
 }
 
 void qemu_iohandler_fill(int *pnfds, fd_set *readfds, fd_set *writefds, fd_set *xfds)
@@ -126,7 +181,7 @@ void qemu_iohandler_poll(fd_set *readfds, fd_set *writefds, fd_set *xfds, int re
             /* Do this last in case read/write handlers marked it for deletion */
             if (ioh->deleted) {
                 QLIST_REMOVE(ioh, next);
-                qemu_free(ioh);
+                g_free(ioh);
             }
         }
     }
@@ -157,7 +212,7 @@ static void sigchld_bh_handler(void *opaque)
     QLIST_FOREACH_SAFE(rec, &child_watches, next, next) {
         if (waitpid(rec->pid, NULL, WNOHANG) == rec->pid) {
             QLIST_REMOVE(rec, next);
-            qemu_free(rec);
+            g_free(rec);
         }
     }
 }
@@ -185,7 +240,7 @@ int qemu_add_child_watch(pid_t pid)
             return 1;
         }
     }
-    rec = qemu_mallocz(sizeof(ChildProcessRecord));
+    rec = g_malloc0(sizeof(ChildProcessRecord));
     rec->pid = pid;
     QLIST_INSERT_HEAD(&child_watches, rec, next);
     return 0;

@@ -258,6 +258,7 @@ typedef struct NCQTransferState {
     AHCIDevice *drive;
     BlockDriverAIOCB *aiocb;
     QEMUSGList sglist;
+    BlockAcctCookie acct;
     int is_read;
     uint16_t sector_count;
     uint64_t lba;
@@ -289,7 +290,7 @@ struct AHCIDevice {
 typedef struct AHCIState {
     AHCIDevice *dev;
     AHCIControlRegs control_regs;
-    int mem;
+    MemoryRegion mem;
     int ports;
     qemu_irq irq;
 } AHCIState;

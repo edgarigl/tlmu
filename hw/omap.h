@@ -17,6 +17,7 @@
  * with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 #ifndef hw_omap_h
+#include "memory.h"
 # define hw_omap_h		"omap.h"
 
 # define OMAP_EMIFS_BASE	0x00000000
@@ -117,11 +118,12 @@ void omap_sdrc_reset(struct omap_sdrc_s *s);
 
 /* OMAP2 general purpose memory controller */
 struct omap_gpmc_s;
-struct omap_gpmc_s *omap_gpmc_init(target_phys_addr_t base, qemu_irq irq);
+struct omap_gpmc_s *omap_gpmc_init(struct omap_mpu_state_s *mpu,
+                                   target_phys_addr_t base,
+                                   qemu_irq irq, qemu_irq drq);
 void omap_gpmc_reset(struct omap_gpmc_s *s);
-void omap_gpmc_attach(struct omap_gpmc_s *s, int cs, int iomemtype,
-                void (*base_upd)(void *opaque, target_phys_addr_t new),
-                void (*unmap)(void *opaque), void *opaque);
+void omap_gpmc_attach(struct omap_gpmc_s *s, int cs, MemoryRegion *iomem);
+void omap_gpmc_attach_nand(struct omap_gpmc_s *s, int cs, DeviceState *nand);
 
 /*
  * Common IRQ numbers for level 1 interrupt handler
@@ -787,6 +789,7 @@ i2c_bus *omap_i2c_bus(struct omap_i2c_s *s);
 # define cpu_is_omap2420(cpu)		(cpu->mpu_model == omap2420)
 # define cpu_is_omap2430(cpu)		(cpu->mpu_model == omap2430)
 # define cpu_is_omap3430(cpu)		(cpu->mpu_model == omap3430)
+# define cpu_is_omap3630(cpu)           (cpu->mpu_model == omap3630)
 
 # define cpu_is_omap15xx(cpu)		\
         (cpu_is_omap310(cpu) || cpu_is_omap1510(cpu))
@@ -798,7 +801,8 @@ i2c_bus *omap_i2c_bus(struct omap_i2c_s *s);
 # define cpu_class_omap1(cpu)		\
         (cpu_is_omap15xx(cpu) || cpu_is_omap16xx(cpu))
 # define cpu_class_omap2(cpu)		cpu_is_omap24xx(cpu)
-# define cpu_class_omap3(cpu)		cpu_is_omap3430(cpu)
+# define cpu_class_omap3(cpu) \
+        (cpu_is_omap3430(cpu) || cpu_is_omap3630(cpu))
 
 struct omap_mpu_state_s {
     enum omap_mpu_model {
@@ -812,6 +816,7 @@ struct omap_mpu_state_s {
         omap2423,
         omap2430,
         omap3430,
+        omap3630,
     } mpu_model;
 
     CPUState *env;
@@ -1107,7 +1112,7 @@ inline static int debug_register_io_memory(CPUReadMemoryFunc * const *mem_read,
                                            CPUWriteMemoryFunc * const *mem_write,
                                            void *opaque)
 {
-    struct io_fn *s = qemu_malloc(sizeof(struct io_fn));
+    struct io_fn *s = g_malloc(sizeof(struct io_fn));
 
     s->mem_read = mem_read;
     s->mem_write = mem_write;

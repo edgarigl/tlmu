@@ -356,7 +356,7 @@ static int tlm_memory_init(SysBusDevice *dev)
             printf("%s: Failed: to many irqs %d!\n", __func__, s->nr_irq);
             return 1;
         }
-        s->cpu_irq = qemu_mallocz(s->nr_irq * sizeof (*s->cpu_irq));
+        s->cpu_irq = g_malloc0(s->nr_irq * sizeof (*s->cpu_irq));
         for (i = 0; i < s->nr_irq; i++) {
             sysbus_init_irq(dev, &s->cpu_irq[i]);
         }
@@ -439,13 +439,13 @@ void tlm_map_ram(const char *name, uint64_t addr, uint64_t size, int rw)
 {
     struct TLMRegisterRamEntry *ram;
 
-    ram = qemu_mallocz(sizeof *ram);
-    ram->name = qemu_strdup(name);
+    ram = g_malloc0(sizeof *ram);
+    ram->name = g_strdup(name);
     ram->base = addr;
     ram->size = size;
     ram->rw = rw;
 
-    ram->mem = qemu_mallocz(sizeof *ram->mem);
+    ram->mem = g_malloc0(sizeof *ram->mem);
     ram->mem->is_ram = rw;
     ram->mem->base_addr = addr;
     ram->mem->size = size;

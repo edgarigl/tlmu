@@ -229,6 +229,23 @@ static void curl_multi_do(void *arg)
             {
                 CURLState *state = NULL;
                 curl_easy_getinfo(msg->easy_handle, CURLINFO_PRIVATE, (char**)&state);
+
+                /* ACBs for successful messages get completed in curl_read_cb */
+                if (msg->data.result != CURLE_OK) {
+                    int i;
+                    for (i = 0; i < CURL_NUM_ACB; i++) {
+                        CURLAIOCB *acb = state->acb[i];
+
+                        if (acb == NULL) {
+                            continue;
+                        }
+
+                        acb->common.cb(acb->common.opaque, -EIO);
+                        qemu_aio_release(acb);
+                        state->acb[i] = NULL;
+                    }
+                }
+
                 curl_clean_state(state);
                 break;
             }
@@ -277,7 +294,8 @@ static CURLState *curl_init_state(BDRVCURLState *s)
     curl_easy_setopt(state->curl, CURLOPT_FOLLOWLOCATION, 1);
     curl_easy_setopt(state->curl, CURLOPT_NOSIGNAL, 1);
     curl_easy_setopt(state->curl, CURLOPT_ERRORBUFFER, state->errmsg);
-    
+    curl_easy_setopt(state->curl, CURLOPT_FAILONERROR, 1);
+
 #ifdef DEBUG_VERBOSE
     curl_easy_setopt(state->curl, CURLOPT_VERBOSE, 1);
 #endif
@@ -310,7 +328,7 @@ static int curl_open(BlockDriverState *bs, const char *filename, int flags)
 
     static int inited = 0;
 
-    file = qemu_strdup(filename);
+    file = g_strdup(filename);
     s->readahead_size = READ_AHEAD_SIZE;
 
     /* Parse a trailing ":readahead=#:" param, if present. */
@@ -390,7 +408,7 @@ out:
     curl_easy_cleanup(state->curl);
     state->curl = NULL;
 out_noclean:
-    qemu_free(file);
+    g_free(file);
     return -EINVAL;
 }
 
@@ -444,11 +462,11 @@ static BlockDriverAIOCB *curl_aio_readv(BlockDriverState *bs,
 
     state->buf_off = 0;
     if (state->orig_buf)
-        qemu_free(state->orig_buf);
+        g_free(state->orig_buf);
     state->buf_start = start;
     state->buf_len = acb->end + s->readahead_size;
     end = MIN(start + state->buf_len, s->len) - 1;
-    state->orig_buf = qemu_malloc(state->buf_len);
+    state->orig_buf = g_malloc(state->buf_len);
     state->acb[0] = acb;
 
     snprintf(state->range, 127, "%zd-%zd", start, end);
@@ -476,7 +494,7 @@ static void curl_close(BlockDriverState *bs)
             s->states[i].curl = NULL;
         }
         if (s->states[i].orig_buf) {
-            qemu_free(s->states[i].orig_buf);
+            g_free(s->states[i].orig_buf);
             s->states[i].orig_buf = NULL;
         }
     }

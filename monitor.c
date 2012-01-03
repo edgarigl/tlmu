@@ -57,9 +57,11 @@
 #include "json-parser.h"
 #include "osdep.h"
 #include "cpu.h"
-#ifdef CONFIG_SIMPLE_TRACE
-#include "trace.h"
+#include "trace/control.h"
+#ifdef CONFIG_TRACE_SIMPLE
+#include "trace/simple.h"
 #endif
+#include "trace/control.h"
 #include "ui/qemu-spice.h"
 
 //#define DEBUG
@@ -247,7 +249,7 @@ static int monitor_read_password(Monitor *mon, ReadLineFunc *readline_func,
 void monitor_flush(Monitor *mon)
 {
     if (mon && mon->outbuf_index != 0 && !mon->mux_out) {
-        qemu_chr_write(mon->chr, mon->outbuf, mon->outbuf_index);
+        qemu_chr_fe_write(mon->chr, mon->outbuf, mon->outbuf_index);
         mon->outbuf_index = 0;
     }
 }
@@ -592,18 +594,18 @@ static void do_help_cmd(Monitor *mon, const QDict *qdict)
     help_cmd(mon, qdict_get_try_str(qdict, "name"));
 }
 
-#ifdef CONFIG_SIMPLE_TRACE
-static void do_change_trace_event_state(Monitor *mon, const QDict *qdict)
+static void do_trace_event_set_state(Monitor *mon, const QDict *qdict)
 {
     const char *tp_name = qdict_get_str(qdict, "name");
     bool new_state = qdict_get_bool(qdict, "option");
-    int ret = st_change_trace_event_state(tp_name, new_state);
+    int ret = trace_event_set_state(tp_name, new_state);
 
     if (!ret) {
         monitor_printf(mon, "unknown event name \"%s\"\n", tp_name);
     }
 }
 
+#ifdef CONFIG_SIMPLE_TRACE
 static void do_trace_file(Monitor *mon, const QDict *qdict)
 {
     const char *op = qdict_get_try_str(qdict, "op");
@@ -636,7 +638,7 @@ static void user_monitor_complete(void *opaque, QObject *ret_data)
         data->user_print(data->mon, ret_data);
     }
     monitor_resume(data->mon);
-    qemu_free(data);
+    g_free(data);
 }
 
 static void qmp_monitor_complete(void *opaque, QObject *ret_data)
@@ -660,7 +662,7 @@ static void user_async_cmd_handler(Monitor *mon, const mon_cmd_t *cmd,
 {
     int ret;
 
-    MonitorCompletionData *cb_data = qemu_malloc(sizeof(*cb_data));
+    MonitorCompletionData *cb_data = g_malloc(sizeof(*cb_data));
     cb_data->mon = mon;
     cb_data->user_print = cmd->user_print;
     monitor_suspend(mon);
@@ -668,7 +670,7 @@ static void user_async_cmd_handler(Monitor *mon, const mon_cmd_t *cmd,
                                   user_monitor_complete, cb_data);
     if (ret < 0) {
         monitor_resume(mon);
-        qemu_free(cb_data);
+        g_free(cb_data);
     }
 }
 
@@ -676,14 +678,14 @@ static void user_async_info_handler(Monitor *mon, const mon_cmd_t *cmd)
 {
     int ret;
 
-    MonitorCompletionData *cb_data = qemu_malloc(sizeof(*cb_data));
+    MonitorCompletionData *cb_data = g_malloc(sizeof(*cb_data));
     cb_data->mon = mon;
     cb_data->user_print = cmd->user_print;
     monitor_suspend(mon);
     ret = cmd->mhandler.info_async(mon, user_monitor_complete, cb_data);
     if (ret < 0) {
         monitor_resume(mon);
-        qemu_free(cb_data);
+        g_free(cb_data);
     }
 }
 
@@ -996,17 +998,17 @@ static void do_info_cpu_stats(Monitor *mon)
 }
 #endif
 
-#if defined(CONFIG_SIMPLE_TRACE)
+#if defined(CONFIG_TRACE_SIMPLE)
 static void do_info_trace(Monitor *mon)
 {
     st_print_trace((FILE *)mon, &monitor_fprintf);
 }
-
-static void do_info_trace_events(Monitor *mon)
-{
-    st_print_trace_events((FILE *)mon, &monitor_fprintf);
-}
 #endif
+
+static void do_trace_print_events(Monitor *mon)
+{
+    trace_print_events((FILE *)mon, &monitor_fprintf);
+}
 
 /**
  * do_quit(): Quit QEMU execution
@@ -1189,7 +1191,6 @@ static int add_graphics_client(Monitor *mon, const QDict *qdict, QObject **ret_d
 {
     const char *protocol  = qdict_get_str(qdict, "protocol");
     const char *fdname = qdict_get_str(qdict, "fdname");
-    int skipauth = qdict_get_try_bool(qdict, "skipauth", 0);
     CharDriverState *s;
 
     if (strcmp(protocol, "spice") == 0) {
@@ -1203,6 +1204,7 @@ static int add_graphics_client(Monitor *mon, const QDict *qdict, QObject **ret_d
 #ifdef CONFIG_VNC
     } else if (strcmp(protocol, "vnc") == 0) {
 	int fd = monitor_get_fd(mon, fdname);
+        int skipauth = qdict_get_try_bool(qdict, "skipauth", 0);
 	vnc_display_add_client(NULL, fd, skipauth);
 	return 0;
 #endif
@@ -2054,7 +2056,7 @@ static void print_pte(Monitor *mon, target_phys_addr_t addr,
 
 static void tlb_info_32(Monitor *mon, CPUState *env)
 {
-    int l1, l2;
+    unsigned int l1, l2;
     uint32_t pgd, pde, pte;
 
     pgd = env->cr[3] & ~0xfff;
@@ -2082,7 +2084,7 @@ static void tlb_info_32(Monitor *mon, CPUState *env)
 
 static void tlb_info_pae32(Monitor *mon, CPUState *env)
 {
-    int l1, l2, l3;
+    unsigned int l1, l2, l3;
     uint64_t pdpe, pde, pte;
     uint64_t pdp_addr, pd_addr, pt_addr;
 
@@ -2226,7 +2228,8 @@ static void mem_print(Monitor *mon, target_phys_addr_t *pstart,
 
 static void mem_info_32(Monitor *mon, CPUState *env)
 {
-    int l1, l2, prot, last_prot;
+    unsigned int l1, l2;
+    int prot, last_prot;
     uint32_t pgd, pde, pte;
     target_phys_addr_t start, end;
 
@@ -2247,7 +2250,8 @@ static void mem_info_32(Monitor *mon, CPUState *env)
                     pte = le32_to_cpu(pte);
                     end = (l1 << 22) + (l2 << 12);
                     if (pte & PG_PRESENT_MASK) {
-                        prot = pte & (PG_USER_MASK | PG_RW_MASK | PG_PRESENT_MASK);
+                        prot = pte & pde &
+                            (PG_USER_MASK | PG_RW_MASK | PG_PRESENT_MASK);
                     } else {
                         prot = 0;
                     }
@@ -2259,11 +2263,14 @@ static void mem_info_32(Monitor *mon, CPUState *env)
             mem_print(mon, &start, &last_prot, end, prot);
         }
     }
+    /* Flush last range */
+    mem_print(mon, &start, &last_prot, (target_phys_addr_t)1 << 32, 0);
 }
 
 static void mem_info_pae32(Monitor *mon, CPUState *env)
 {
-    int l1, l2, l3, prot, last_prot;
+    unsigned int l1, l2, l3;
+    int prot, last_prot;
     uint64_t pdpe, pde, pte;
     uint64_t pdp_addr, pd_addr, pt_addr;
     target_phys_addr_t start, end;
@@ -2293,8 +2300,8 @@ static void mem_info_pae32(Monitor *mon, CPUState *env)
                             pte = le64_to_cpu(pte);
                             end = (l1 << 30) + (l2 << 21) + (l3 << 12);
                             if (pte & PG_PRESENT_MASK) {
-                                prot = pte & (PG_USER_MASK | PG_RW_MASK |
-                                              PG_PRESENT_MASK);
+                                prot = pte & pde & (PG_USER_MASK | PG_RW_MASK |
+                                                    PG_PRESENT_MASK);
                             } else {
                                 prot = 0;
                             }
@@ -2311,6 +2318,8 @@ static void mem_info_pae32(Monitor *mon, CPUState *env)
             mem_print(mon, &start, &last_prot, end, prot);
         }
     }
+    /* Flush last range */
+    mem_print(mon, &start, &last_prot, (target_phys_addr_t)1 << 32, 0);
 }
 
 
@@ -2339,6 +2348,7 @@ static void mem_info_64(Monitor *mon, CPUState *env)
                     if (pdpe & PG_PSE_MASK) {
                         prot = pdpe & (PG_USER_MASK | PG_RW_MASK |
                                        PG_PRESENT_MASK);
+                        prot &= pml4e;
                         mem_print(mon, &start, &last_prot, end, prot);
                     } else {
                         pd_addr = pdpe & 0x3fffffffff000ULL;
@@ -2350,6 +2360,7 @@ static void mem_info_64(Monitor *mon, CPUState *env)
                                 if (pde & PG_PSE_MASK) {
                                     prot = pde & (PG_USER_MASK | PG_RW_MASK |
                                                   PG_PRESENT_MASK);
+                                    prot &= pml4e & pdpe;
                                     mem_print(mon, &start, &last_prot, end, prot);
                                 } else {
                                     pt_addr = pde & 0x3fffffffff000ULL;
@@ -2363,6 +2374,7 @@ static void mem_info_64(Monitor *mon, CPUState *env)
                                         if (pte & PG_PRESENT_MASK) {
                                             prot = pte & (PG_USER_MASK | PG_RW_MASK |
                                                           PG_PRESENT_MASK);
+                                            prot &= pml4e & pdpe & pde;
                                         } else {
                                             prot = 0;
                                         }
@@ -2385,6 +2397,8 @@ static void mem_info_64(Monitor *mon, CPUState *env)
             mem_print(mon, &start, &last_prot, end, prot);
         }
     }
+    /* Flush last range */
+    mem_print(mon, &start, &last_prot, (target_phys_addr_t)1 << 48, 0);
 }
 #endif
 
@@ -2545,7 +2559,7 @@ static void do_stop_capture(Monitor *mon, const QDict *qdict)
         if (i == n) {
             s->ops.destroy (s->opaque);
             QLIST_REMOVE (s, entries);
-            qemu_free (s);
+            g_free (s);
             return;
         }
     }
@@ -2562,7 +2576,7 @@ static void do_wav_capture(Monitor *mon, const QDict *qdict)
     int nchannels = qdict_get_try_int(qdict, "nchannels", -1);
     CaptureState *s;
 
-    s = qemu_mallocz (sizeof (*s));
+    s = g_malloc0 (sizeof (*s));
 
     freq = has_freq ? freq : 44100;
     bits = has_bits ? bits : 16;
@@ -2570,7 +2584,7 @@ static void do_wav_capture(Monitor *mon, const QDict *qdict)
 
     if (wav_start_capture (s, path, freq, bits, nchannels)) {
         monitor_printf(mon, "Failed to add wave capture\n");
-        qemu_free (s);
+        g_free (s);
         return;
     }
     QLIST_INSERT_HEAD (&capture_head, s, entries);
@@ -2758,7 +2772,7 @@ static int do_getfd(Monitor *mon, const QDict *qdict, QObject **ret_data)
     mon_fd_t *monfd;
     int fd;
 
-    fd = qemu_chr_get_msgfd(mon->chr);
+    fd = qemu_chr_fe_get_msgfd(mon->chr);
     if (fd == -1) {
         qerror_report(QERR_FD_NOT_SUPPLIED);
         return -1;
@@ -2780,8 +2794,8 @@ static int do_getfd(Monitor *mon, const QDict *qdict, QObject **ret_data)
         return 0;
     }
 
-    monfd = qemu_mallocz(sizeof(mon_fd_t));
-    monfd->name = qemu_strdup(fdname);
+    monfd = g_malloc0(sizeof(mon_fd_t));
+    monfd->name = g_strdup(fdname);
     monfd->fd = fd;
 
     QLIST_INSERT_HEAD(&mon->fds, monfd, next);
@@ -2800,8 +2814,8 @@ static int do_closefd(Monitor *mon, const QDict *qdict, QObject **ret_data)
 
         QLIST_REMOVE(monfd, next);
         close(monfd->fd);
-        qemu_free(monfd->name);
-        qemu_free(monfd);
+        g_free(monfd->name);
+        g_free(monfd);
         return 0;
     }
 
@@ -2836,8 +2850,8 @@ int monitor_get_fd(Monitor *mon, const char *fdname)
 
         /* caller takes ownership of fd */
         QLIST_REMOVE(monfd, next);
-        qemu_free(monfd->name);
-        qemu_free(monfd);
+        g_free(monfd->name);
+        g_free(monfd);
 
         return fd;
     }
@@ -3123,7 +3137,7 @@ static const mon_cmd_t info_cmds[] = {
         .help       = "show roms",
         .mhandler.info = do_info_roms,
     },
-#if defined(CONFIG_SIMPLE_TRACE)
+#if defined(CONFIG_TRACE_SIMPLE)
     {
         .name       = "trace",
         .args_type  = "",
@@ -3131,14 +3145,14 @@ static const mon_cmd_t info_cmds[] = {
         .help       = "show current contents of trace buffer",
         .mhandler.info = do_info_trace,
     },
+#endif
     {
         .name       = "trace-events",
         .args_type  = "",
         .params     = "",
         .help       = "show available trace-events & their state",
-        .mhandler.info = do_info_trace_events,
+        .mhandler.info = do_trace_print_events,
     },
-#endif
     {
         .name       = NULL,
     },
@@ -4034,7 +4048,7 @@ static char *key_get_info(const char *type, char **key)
     }
     len = p - type;
 
-    str = qemu_malloc(len + 1);
+    str = g_malloc(len + 1);
     memcpy(str, type, len);
     str[len] = '\0';
 
@@ -4417,7 +4431,7 @@ static const mon_cmd_t *monitor_parse_command(Monitor *mon,
             monitor_printf(mon, "%s: unknown type '%c'\n", cmdname, c);
             goto fail;
         }
-        qemu_free(key);
+        g_free(key);
         key = NULL;
     }
     /* check that all arguments were parsed */
@@ -4432,7 +4446,7 @@ static const mon_cmd_t *monitor_parse_command(Monitor *mon,
     return cmd;
 
 fail:
-    qemu_free(key);
+    g_free(key);
     return NULL;
 }
 
@@ -4631,7 +4645,7 @@ static void parse_cmdline(const char *cmdline,
         if (nb_args >= MAX_ARGS)
             break;
         ret = get_str(buf, sizeof(buf), &p);
-        args[nb_args] = qemu_strdup(buf);
+        args[nb_args] = g_strdup(buf);
         nb_args++;
         if (ret < 0)
             break;
@@ -4668,7 +4682,7 @@ static void monitor_find_completion(const char *cmdline)
         if (nb_args >= MAX_ARGS) {
             goto cleanup;
         }
-        args[nb_args++] = qemu_strdup("");
+        args[nb_args++] = g_strdup("");
     }
     if (nb_args <= 1) {
         /* command completion */
@@ -4743,7 +4757,7 @@ static void monitor_find_completion(const char *cmdline)
 
 cleanup:
     for (i = 0; i < nb_args; i++) {
-        qemu_free(args[i]);
+        g_free(args[i]);
     }
 }
 
@@ -5261,7 +5275,7 @@ void monitor_init(CharDriverState *chr, int flags)
         is_first_init = 0;
     }
 
-    mon = qemu_mallocz(sizeof(*mon));
+    mon = g_malloc0(sizeof(*mon));
 
     mon->chr = chr;
     mon->flags = flags;
@@ -5271,11 +5285,11 @@ void monitor_init(CharDriverState *chr, int flags)
     }
 
     if (monitor_ctrl_mode(mon)) {
-        mon->mc = qemu_mallocz(sizeof(MonitorControl));
+        mon->mc = g_malloc0(sizeof(MonitorControl));
         /* Control mode requires special handlers */
         qemu_chr_add_handlers(chr, monitor_can_read, monitor_control_read,
                               monitor_control_event, mon);
-        qemu_chr_set_echo(chr, true);
+        qemu_chr_fe_set_echo(chr, true);
     } else {
         qemu_chr_add_handlers(chr, monitor_can_read, monitor_read,
                               monitor_event, mon);

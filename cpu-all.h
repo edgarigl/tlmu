@@ -490,7 +490,7 @@ typedef struct RAMBlock {
 
 typedef struct RAMList {
     uint8_t *phys_dirty;
-    QLIST_HEAD(ram, RAMBlock) blocks;
+    QLIST_HEAD(, RAMBlock) blocks;
 } RAMList;
 extern RAMList ram_list;
 

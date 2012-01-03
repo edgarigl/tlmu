@@ -45,7 +45,7 @@ endif
 config-target.h: config-target.h-timestamp
 config-target.h-timestamp: config-target.mak
 
-ifdef CONFIG_SYSTEMTAP_TRACE
+ifdef CONFIG_TRACE_SYSTEMTAP
 stap: $(QEMU_PROG).stp
 
 ifdef CONFIG_USER_ONLY
@@ -114,7 +114,7 @@ $(call set-vpath, $(SRC_PATH)/linux-user:$(SRC_PATH)/linux-user/$(TARGET_ABI_DIR
 QEMU_CFLAGS+=-I$(SRC_PATH)/linux-user/$(TARGET_ABI_DIR) -I$(SRC_PATH)/linux-user
 obj-y = main.o syscall.o strace.o mmap.o signal.o thunk.o \
       elfload.o linuxload.o uaccess.o gdbstub.o cpu-uname.o \
-      qemu-malloc.o user-exec.o $(oslib-obj-y)
+      user-exec.o $(oslib-obj-y)
 
 obj-$(TARGET_HAS_BFLT) += flatload.o
 
@@ -315,7 +315,6 @@ obj-microblaze-$(CONFIG_FDT) += device_tree.o
 # Boards
 obj-cris-y = cris_pic_cpu.o
 obj-cris-y += cris-boot.o
-obj-cris-y += etraxfs.o axis_dev88.o
 obj-cris-y += axis_dev88.o
 obj-cris-y += tlm_mach.o
 obj-cris-y += tlm_mem.o
@@ -398,16 +397,18 @@ obj-y += $(addprefix $(HWDIR)/, $(hw-obj-y))
 endif # CONFIG_SOFTMMU
 
 ifndef CONFIG_LINUX_USER
+ifndef CONFIG_BSD_USER
 # libcacard needs qemu-thread support, and besides is only needed by devices
-# so not requires with linux-user targets
+# so not requires with linux-user / bsd-user targets
 obj-$(CONFIG_SMARTCARD_NSS) += $(addprefix ../libcacard/, $(libcacard-y))
+endif # CONFIG_BSD_USER
 endif # CONFIG_LINUX_USER
 
 obj-y += $(addprefix ../, $(trace-obj-y))
 obj-$(CONFIG_GDBSTUB_XML) += gdbstub-xml.o
 
 $(QEMU_PROG): $(obj-y) $(obj-$(TARGET_BASE_ARCH)-y)
-	$(call LINK,$(obj-y) $(obj-$(TARGET_BASE_ARCH)-y))
+	$(call LINK,$^)
 
 tobj-y = $(obj-y)
 tobj-y += $(obj-$(TARGET_BASE_ARCH)-y)
@@ -430,7 +431,7 @@ clean:
 	rm -f *.o *.a *~ $(PROGS) nwfpe/*.o fpu/*.o
 	rm -f *.d */*.d tcg/*.o ide/*.o 9pfs/*.o
 	rm -f hmp-commands.h qmp-commands.h gdbstub-xml.c
-ifdef CONFIG_SYSTEMTAP_TRACE
+ifdef CONFIG_TRACE_SYSTEMTAP
 	rm -f *.stp
 endif
 
@@ -450,7 +451,7 @@ ifneq ($(STRIP),)
 	$(STRIP) $(patsubst %,"$(DESTDIR)$(bindir)/%",$(PROGS))
 endif
 endif
-ifdef CONFIG_SYSTEMTAP_TRACE
+ifdef CONFIG_TRACE_SYSTEMTAP
 	$(INSTALL_DIR) "$(DESTDIR)$(datadir)/../systemtap/tapset"
 	$(INSTALL_DATA) $(QEMU_PROG).stp "$(DESTDIR)$(datadir)/../systemtap/tapset"
 endif

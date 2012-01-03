@@ -5,7 +5,7 @@
 #include <dirent.h>
 #include <sys/time.h>
 #include <utime.h>
-
+#include "hw/virtio.h"
 #include "fsdev/file-op-9p.h"
 
 /* The feature bitmap for virtio 9P */
@@ -114,6 +114,7 @@ static inline const char *rpath(FsContext *ctx, const char *path, char *buffer)
 #define P9_IOHDRSZ 24
 
 typedef struct V9fsPDU V9fsPDU;
+struct V9fsState;
 
 struct V9fsPDU
 {
@@ -121,6 +122,7 @@ struct V9fsPDU
     uint16_t tag;
     uint8_t id;
     VirtQueueElement elem;
+    struct V9fsState *s;
     QLIST_ENTRY(V9fsPDU) next;
 };
 
@@ -220,31 +222,6 @@ typedef struct V9fsState
     int32_t msize;
 } V9fsState;
 
-typedef struct V9fsCreateState {
-    V9fsPDU *pdu;
-    size_t offset;
-    V9fsFidState *fidp;
-    V9fsQID qid;
-    int32_t perm;
-    int8_t mode;
-    struct stat stbuf;
-    V9fsString name;
-    V9fsString extension;
-    V9fsString fullname;
-    int iounit;
-} V9fsCreateState;
-
-typedef struct V9fsLcreateState {
-    V9fsPDU *pdu;
-    size_t offset;
-    V9fsFidState *fidp;
-    V9fsQID qid;
-    int32_t iounit;
-    struct stat stbuf;
-    V9fsString name;
-    V9fsString fullname;
-} V9fsLcreateState;
-
 typedef struct V9fsStatState {
     V9fsPDU *pdu;
     size_t offset;
@@ -275,27 +252,6 @@ typedef struct V9fsStatDotl {
     uint64_t st_gen;
     uint64_t st_data_version;
 } V9fsStatDotl;
-
-typedef struct V9fsStatStateDotl {
-    V9fsPDU *pdu;
-    size_t offset;
-    V9fsStatDotl v9stat_dotl;
-    struct stat stbuf;
-} V9fsStatStateDotl;
-
-
-typedef struct V9fsWalkState {
-    V9fsPDU *pdu;
-    size_t offset;
-    uint16_t nwnames;
-    int name_idx;
-    V9fsQID *qids;
-    V9fsFidState *fidp;
-    V9fsFidState *newfidp;
-    V9fsString path;
-    V9fsString *wnames;
-    struct stat stbuf;
-} V9fsWalkState;
 
 typedef struct V9fsOpenState {
     V9fsPDU *pdu;
@@ -339,34 +295,6 @@ typedef struct V9fsWriteState {
     int cnt;
 } V9fsWriteState;
 
-typedef struct V9fsRemoveState {
-    V9fsPDU *pdu;
-    size_t offset;
-    V9fsFidState *fidp;
-} V9fsRemoveState;
-
-typedef struct V9fsWstatState
-{
-    V9fsPDU *pdu;
-    size_t offset;
-    int16_t unused;
-    V9fsStat v9stat;
-    V9fsFidState *fidp;
-    struct stat stbuf;
-} V9fsWstatState;
-
-typedef struct V9fsSymlinkState
-{
-    V9fsPDU *pdu;
-    size_t offset;
-    V9fsString name;
-    V9fsString symname;
-    V9fsString fullname;
-    V9fsFidState *dfidp;
-    V9fsQID qid;
-    struct stat stbuf;
-} V9fsSymlinkState;
-
 typedef struct V9fsIattr
 {
     int32_t valid;
@@ -380,14 +308,6 @@ typedef struct V9fsIattr
     int64_t mtime_nsec;
 } V9fsIattr;
 
-typedef struct V9fsSetattrState
-{
-    V9fsPDU *pdu;
-    size_t offset;
-    V9fsIattr v9iattr;
-    V9fsFidState *fidp;
-} V9fsSetattrState;
-
 struct virtio_9p_config
 {
     /* number of characters in tag */
@@ -395,28 +315,6 @@ struct virtio_9p_config
     /* Variable size tag name */
     uint8_t tag[0];
 } __attribute__((packed));
-
-typedef struct V9fsStatfs
-{
-    uint32_t f_type;
-    uint32_t f_bsize;
-    uint64_t f_blocks;
-    uint64_t f_bfree;
-    uint64_t f_bavail;
-    uint64_t f_files;
-    uint64_t f_ffree;
-    uint64_t fsid_val;
-    uint32_t f_namelen;
-} V9fsStatfs;
-
-typedef struct V9fsStatfsState {
-    V9fsPDU *pdu;
-    size_t offset;
-    int32_t fid;
-    V9fsStatfs v9statfs;
-    V9fsFidState *fidp;
-    struct statfs stbuf;
-} V9fsStatfsState;
 
 typedef struct V9fsMkState {
     V9fsPDU *pdu;
@@ -426,26 +324,6 @@ typedef struct V9fsMkState {
     V9fsString name;
     V9fsString fullname;
 } V9fsMkState;
-
-typedef struct V9fsRenameState {
-    V9fsPDU *pdu;
-    V9fsFidState *fidp;
-    size_t offset;
-    int32_t newdirfid;
-    V9fsString name;
-} V9fsRenameState;
-
-typedef struct V9fsXattrState
-{
-    V9fsPDU *pdu;
-    size_t offset;
-    V9fsFidState *file_fidp;
-    V9fsFidState *xattr_fidp;
-    V9fsString name;
-    int64_t size;
-    int flags;
-    void *value;
-} V9fsXattrState;
 
 #define P9_LOCK_SUCCESS 0
 #define P9_LOCK_BLOCKED 1
@@ -465,16 +343,6 @@ typedef struct V9fsFlock
     V9fsString client_id;
 } V9fsFlock;
 
-typedef struct V9fsLockState
-{
-    V9fsPDU *pdu;
-    size_t offset;
-    int8_t status;
-    struct stat stbuf;
-    V9fsFidState *fidp;
-    V9fsFlock *flock;
-} V9fsLockState;
-
 typedef struct V9fsGetlock
 {
     uint8_t type;
@@ -483,22 +351,6 @@ typedef struct V9fsGetlock
     uint32_t proc_id;
     V9fsString client_id;
 } V9fsGetlock;
-
-typedef struct V9fsGetlockState
-{
-    V9fsPDU *pdu;
-    size_t offset;
-    struct stat stbuf;
-    V9fsFidState *fidp;
-    V9fsGetlock *glock;
-} V9fsGetlockState;
-
-typedef struct V9fsReadLinkState
-{
-    V9fsPDU *pdu;
-    size_t offset;
-    V9fsString target;
-} V9fsReadLinkState;
 
 size_t pdu_packunpack(void *addr, struct iovec *sg, int sg_count,
                       size_t offset, size_t size, int pack);
@@ -510,5 +362,4 @@ static inline size_t do_pdu_unpack(void *dst, struct iovec *sg, int sg_count,
 }
 
 extern void handle_9p_output(VirtIODevice *vdev, VirtQueue *vq);
-
 #endif

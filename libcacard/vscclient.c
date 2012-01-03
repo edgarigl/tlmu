@@ -488,7 +488,7 @@ main(
         for (i = 0; i < cert_count; i++) {
             len += strlen(cert_names[i])+1; /* 1 == comma */
         }
-        new_args = qemu_malloc(len);
+        new_args = g_malloc(len);
         strcpy(new_args, emul_args);
         strcat(new_args, SOFT_STRING);
         for (i = 0; i < cert_count; i++) {
@@ -585,7 +585,7 @@ main(
                 printf(" recv APDU: ");
                 print_byte_array(pbSendBuffer, mhHeader.length);
             }
-            /* Transmit recieved APDU */
+            /* Transmit received APDU */
             dwSendLength = mhHeader.length;
             dwRecvLength = sizeof(pbRecvBuffer);
             reader = vreader_get_reader_by_id(mhHeader.reader_id);

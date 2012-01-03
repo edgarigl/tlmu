@@ -133,7 +133,7 @@ ETEXI
 DEF("drive", HAS_ARG, QEMU_OPTION_drive,
     "-drive [file=file][,if=type][,bus=n][,unit=m][,media=d][,index=i]\n"
     "       [,cyls=c,heads=h,secs=s[,trans=t]][,snapshot=on|off]\n"
-    "       [,cache=writethrough|writeback|none|unsafe][,format=f]\n"
+    "       [,cache=writethrough|writeback|none|directsync|unsafe][,format=f]\n"
     "       [,serial=s][,addr=A][,id=name][,aio=threads|native]\n"
     "       [,readonly=on|off]\n"
     "                use 'file' as a drive image\n", QEMU_ARCH_ALL)
@@ -164,7 +164,7 @@ These options have the same definition as they have in @option{-hdachs}.
 @item snapshot=@var{snapshot}
 @var{snapshot} is "on" or "off" and allows to enable snapshot for given drive (see @option{-snapshot}).
 @item cache=@var{cache}
-@var{cache} is "none", "writeback", "unsafe", or "writethrough" and controls how the host cache is used to access block data.
+@var{cache} is "none", "writeback", "unsafe", "directsync" or "writethrough" and controls how the host cache is used to access block data.
 @item aio=@var{aio}
 @var{aio} is "threads", or "native" and selects between pthread based disk I/O and native Linux AIO.
 @item format=@var{format}
@@ -198,6 +198,10 @@ corruption.
 The host page cache can be avoided entirely with @option{cache=none}.  This will
 attempt to do disk IO directly to the guests memory.  QEMU may still perform
 an internal copy of the data.
+
+The host page cache can be avoided while only sending write notifications to
+the guest when the data has been reported as written by the storage subsystem
+using @option{cache=directsync}.
 
 Some block drivers perform badly with @option{cache=writethrough}, most notably,
 qcow2.  If performance is more important than correctness,
@@ -2432,17 +2436,32 @@ Normally QEMU loads a configuration file from @var{sysconfdir}/qemu.conf and
 @var{sysconfdir}/target-@var{ARCH}.conf on startup.  The @code{-nodefconfig}
 option will prevent QEMU from loading these configuration files at startup.
 ETEXI
-#ifdef CONFIG_SIMPLE_TRACE
 DEF("trace", HAS_ARG, QEMU_OPTION_trace,
-    "-trace\n"
-    "                Specify a trace file to log traces to\n",
+    "-trace [events=<file>][,file=<file>]\n"
+    "                specify tracing options\n",
     QEMU_ARCH_ALL)
 STEXI
-@item -trace
+HXCOMM This line is not accurate, as some sub-options are backend-specific but
+HXCOMM HX does not support conditional compilation of text.
+@item -trace [events=@var{file}][,file=@var{file}]
 @findex -trace
-Specify a trace file to log output traces to.
+
+Specify tracing options.
+
+@table @option
+@item events=@var{file}
+Immediately enable events listed in @var{file}.
+The file must contain one event name (as listed in the @var{trace-events} file)
+per line.
+
+This option is only available when using the @var{simple} and @var{stderr}
+tracing backends.
+@item file=@var{file}
+Log output traces to @var{file}.
+
+This option is only available when using the @var{simple} tracing backend.
+@end table
 ETEXI
-#endif
 
 HXCOMM This is the last statement. Insert new options before this line!
 STEXI
