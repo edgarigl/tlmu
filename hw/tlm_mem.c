@@ -416,7 +416,7 @@ static void map_ram(struct TLMRegisterRamEntry *ram)
                                         DEVICE_NATIVE_ENDIAN);
     tlm_rb.iodev = ram->iodev;
     p = qemu_ram_alloc_from_ptr_2(NULL, ram->name, ram->size,
-                                  (void *) ram->base, &tlm_rb);
+                                  ((char *) 0) + ram->base, &tlm_rb);
     cpu_register_physical_memory(ram->base, ram->size,
                                  p | (ram->rw ? IO_MEM_RAM : IO_MEM_ROM));
 }
