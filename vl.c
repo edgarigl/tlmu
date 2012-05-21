@@ -2159,26 +2159,6 @@ static const QEMUOption *lookup_opt(int argc, char **argv,
     return popt;
 }
 
-static gpointer malloc_and_trace(gsize n_bytes)
-{
-    void *ptr = malloc(n_bytes);
-    trace_qemu_malloc(n_bytes, ptr);
-    return ptr;
-}
-
-static gpointer realloc_and_trace(gpointer mem, gsize n_bytes)
-{
-    void *ptr = realloc(mem, n_bytes);
-    trace_qemu_realloc(mem, n_bytes, ptr);
-    return ptr;
-}
-
-static void free_and_trace(gpointer mem)
-{
-    trace_qemu_free(mem);
-    free(mem);
-}
-
 int vl_main(int ignore_sigint, int no_sdl, int no_gui_timer,
             int argc, char **argv, char **envp);
 
@@ -2215,18 +2195,11 @@ int vl_main(int ignore_sigint, int no_sdl, int no_gui_timer,
     int defconfig = 1;
     const char *log_mask = NULL;
     const char *log_file = NULL;
-    GMemVTable mem_trace = {
-        .malloc = malloc_and_trace,
-        .realloc = realloc_and_trace,
-        .free = free_and_trace,
-    };
     const char *trace_events = NULL;
     const char *trace_file = NULL;
 
     atexit(qemu_run_exit_notifiers);
     error_set_progname(argv[0]);
-
-    g_mem_set_vtable(&mem_trace);
 
     init_clocks();
 
