@@ -68,7 +68,7 @@ int v9fs_init_worker_threads(void)
     pthread_sigmask(SIG_SETMASK, &set, &oldset);
 
     /* init thread system if not already initialized */
-    if (!g_thread_get_initialized()) {
+    if (!g_thread_supported()) {
         g_thread_init(NULL);
     }
     if (qemu_pipe(notifier_fds) == -1) {
