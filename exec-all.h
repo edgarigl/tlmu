@@ -330,7 +330,14 @@ static inline tb_page_addr_t get_page_addr_code(CPUState *env1, target_ulong add
          paddr >>= IO_MEM_SHIFT;
          paddr &= (IO_MEM_NB_ENTRIES - 1);
          if (mmio && tlm_iodev_is_ram(paddr)) {
-             return qemu_ram_addr_from_tlmram_nofail((void *)(unsigned long)addr);
+             RAMBlock *block;
+             QLIST_FOREACH(block, &ram_list.blocks, next){
+                 if(paddr == (block->TLM.iodev >> IO_MEM_SHIFT)){
+                     return block->offset + (uintptr_t)(addr) + env1->tlb_table[mmu_idx][page_index].addend - (uintptr_t)(block->host);
+                 }
+             }
+             fprintf(stderr, "Bad ram pointer %llx\n", (unsigned long long)addr);
+             abort();
          } else {
              cpu_abort(env1, "Trying to execute code outside RAM or ROM at 0x"
                               TARGET_FMT_lx "\n", addr);
