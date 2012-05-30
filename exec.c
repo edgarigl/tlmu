@@ -4409,18 +4409,24 @@ static inline uint32_t ldl_phys_internal(target_phys_addr_t addr,
 #endif
     } else {
         /* RAM case */
+        TLM_RAMBlock *const tlm_rb = qemu_get_ram_tlmblock(pd & TARGET_PAGE_MASK);
         ptr = qemu_get_ram_ptr(pd & TARGET_PAGE_MASK) +
             (addr & ~TARGET_PAGE_MASK);
-        switch (endian) {
-        case DEVICE_LITTLE_ENDIAN:
-            val = ldl_le_p(ptr);
-            break;
-        case DEVICE_BIG_ENDIAN:
-            val = ldl_be_p(ptr);
-            break;
-        default:
-            val = ldl_p(ptr);
-            break;
+        if(tlm_rb){
+            tlm_rb->bus_access(tlm_rb->opaque, -1, 0, addr, &val, sizeof(val));
+        }
+        else {
+            switch (endian) {
+                case DEVICE_LITTLE_ENDIAN:
+                    val = ldl_le_p(ptr);
+                    break;
+                case DEVICE_BIG_ENDIAN:
+                    val = ldl_be_p(ptr);
+                    break;
+                default:
+                    val = ldl_p(ptr);
+                    break;
+            }
         }
     }
     return val;
