@@ -36,6 +36,10 @@
 #include "mips_cpudevs.h"
 #endif
 
+#ifdef TARGET_ARM
+#include "arm-misc.h"
+#endif
+
 #include "tlm.h"
 #include "tlm_mem.h"
 
@@ -117,9 +121,9 @@ void tlm_mach_init_common (ram_addr_t ram_size,
     tlm_map(env_, 0x0ULL, 0xffffffffULL,
             tlm_sync_period_ns, cpu_irq, 0, NULL);
 #elif defined(TARGET_ARM)
-    cpu_irq = NULL;
+    cpu_irq = arm_pic_init_cpu(env_);
     tlm_map(env_, 0x0ULL, 0xffffffffULL,
-            tlm_sync_period_ns, cpu_irq, 0, NULL);
+            tlm_sync_period_ns, cpu_irq, 2, NULL);
 #endif
 
     tlm_register_rams();
