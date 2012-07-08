@@ -739,6 +739,12 @@ static void do_v7m_exception_exit(CPUARMState *env)
 
     /* Switch to the target stack.  */
     switch_v7m_sp(env, (type & 4) != 0);
+    if ((type & 4) != 0) {
+       env->v7m.control |= 0x02;
+    }
+    else {
+       env->v7m.control &= ~0x02;
+    }
     /* Pop registers.  */
     env->regs[0] = v7m_pop(env);
     env->regs[1] = v7m_pop(env);
@@ -826,6 +832,7 @@ static void do_interrupt_v7m(CPUARMState *env)
     v7m_push(env, env->regs[2]);
     v7m_push(env, env->regs[1]);
     v7m_push(env, env->regs[0]);
+    env->v7m.control &= ~0x02;
     switch_v7m_sp(env, 0);
     env->uncached_cpsr &= ~CPSR_IT;
     env->regs[14] = lr;
