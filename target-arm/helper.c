@@ -725,6 +725,13 @@ static void switch_v7m_sp(CPUARMState *env, int process)
         env->v7m.other_sp = env->regs[13];
         env->regs[13] = tmp;
         env->v7m.current_sp = process;
+
+	/* set SPSEL bit ( 0 = MSP, 1 = PSP ) */
+	if ( process ) {
+            env->v7m.control |= 0x2;
+	} else {
+            env->v7m.control &= ~0x2;
+	}
     }
 }
 
