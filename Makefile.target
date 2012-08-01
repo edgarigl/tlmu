@@ -416,7 +416,7 @@ tobj-y += $(obj-$(TARGET_BASE_ARCH)-y)
 $(LIB_TLMU): $(tobj-y)
 	$(CC) -shared -Wl,-soname,$(LIB_TLMU) \
 	        -Wl,--version-script=$(SRC_PATH)/lib-tlmu.version \
-	        --whole-archive -o $@ $+ -pthread $(LIBS)
+	        -Wl,--whole-archive -o $@ $+ -Wl,--no-whole-archive -pthread $(LIBS)
 
 gdbstub-xml.c: $(TARGET_XML_FILES) $(SRC_PATH)/scripts/feature_to_c.sh
 	$(call quiet-command,rm -f $@ && $(SHELL) $(SRC_PATH)/scripts/feature_to_c.sh $@ $(TARGET_XML_FILES),"  GEN   $(TARGET_DIR)$@")

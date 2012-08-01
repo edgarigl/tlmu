@@ -258,13 +258,22 @@ static void copylib(const char *path, const char *newpath)
 		goto err;
 	}
 	do {
+		ssize_t written;
+
 		char buf[4 * 1024];
 		r = read(s, buf, sizeof buf);
 		if (r < 0 && (errno == EINTR || errno == EAGAIN))
 			continue;
 		/* TODO: handle partial writes.  */
 		if (r > 0) {
-			wr = write(d, buf, r);
+			written = 0;
+			do {
+				wr = write(d, buf, r);
+				if (wr <= 0) {
+					goto err;
+				}
+				written += wr;
+			} while (written < r);
 		}
 	} while (r);
 err:
@@ -288,6 +297,9 @@ int tlmu_load(struct tlmu *q, const char *soname)
 	sobasename = basename(socopy);
 
 	n = asprintf(&libname, ".tlmu/%s-%s", sobasename, q->name);
+	if (n < 0)
+		return 1;
+
 	copylib(soname, libname);
 
 	q->dl_handle = dlopen(libname, RTLD_LOCAL | RTLD_DEEPBIND | RTLD_NOW);
