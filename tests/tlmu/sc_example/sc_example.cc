@@ -72,7 +72,7 @@ SC_MODULE(Top)
 	{
 		unsigned int i, j;
 
-		cpu[0] = new tlmu_sc::tlmu_sc("cris0", "libtlmu-cris.so",
+		cpu[0] = new tlmu_sc("cris0", "libtlmu-cris.so",
 					NULL,
 					"crisv10",
 					200 * TLMU_MHZ,
@@ -82,7 +82,7 @@ SC_MODULE(Top)
 					TLMU_BOOT_RUNNING,
 					100 * 1000ULL);
 #if NR_CPUS >= 2
-		cpu[1] = new tlmu_sc::tlmu_sc("arm0", "libtlmu-arm.so",
+		cpu[1] = new tlmu_sc("arm0", "libtlmu-arm.so",
 					NULL,
 					"arm926",
 					200 * TLMU_MHZ,
@@ -93,7 +93,7 @@ SC_MODULE(Top)
 					100 * 1000ULL);
 #endif
 #if NR_CPUS >= 3
-		cpu[2] = new tlmu_sc::tlmu_sc("mipsel0", "libtlmu-mipsel.so",
+		cpu[2] = new tlmu_sc("mipsel0", "libtlmu-mipsel.so",
 					NULL,
 					"24Kc",
 					200 * TLMU_MHZ,
