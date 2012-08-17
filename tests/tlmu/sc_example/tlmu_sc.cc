@@ -268,21 +268,25 @@ void tlmu_sc::to_tlmu_b_transport(tlm::tlm_generic_payload& trans, sc_time& dela
 	unsigned int len = trans.get_data_length();
 	unsigned char *be = trans.get_byte_enable_ptr();
 	unsigned int wid = trans.get_streaming_width();
-	int is_ram;
+	int is_ram = 0;
 	int rw;
+	unsigned int i;
 
 	if (be != NULL) {
 		trans.set_response_status(tlm::TLM_BYTE_ENABLE_ERROR_RESPONSE);
 		return;
 	}
-	if (len > 4 || wid < len) {
+	if (wid < len) {
 		trans.set_response_status(tlm::TLM_BURST_ERROR_RESPONSE);
 		return;
 	}
 
 	rw = cmd == tlm::TLM_WRITE_COMMAND;
 
-	is_ram = tlmu_bus_access(&q, rw, addr, data, len);
+	for (i = 0; i<len; i+=4) {
+		int l = len-i > 4 ? 4: len-i;
+		is_ram = tlmu_bus_access(&q, rw, addr + i, data + i, l);
+	}
 	if (is_ram) {
 		trans.set_dmi_allowed(true);
 	}
