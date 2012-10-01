@@ -49,6 +49,7 @@
 static timer_t tlmu_hosttimer;
 pthread_mutex_t timer_mutex = PTHREAD_MUTEX_INITIALIZER;
 static struct tlmu_timer *timers = NULL;
+static const int64_t default_next_timer_check_ns = 1000000000LL; //1sec
 
 static void tlmu_hosttimer_start(int64_t delta_ns)
 {
@@ -82,6 +83,10 @@ static int64_t tlmu_timers_run(int64_t current_ns)
 		}
 		t = t->next;
 	}
+	if(next_deadline == INT64_MAX) { //no timers found
+		next_deadline = current_ns + default_next_timer_check_ns;
+	}
+
 	return next_deadline;
 }
 
