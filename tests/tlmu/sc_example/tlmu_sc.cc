@@ -290,6 +290,7 @@ void tlmu_sc::to_tlmu_b_transport(tlm::tlm_generic_payload& trans, sc_time& dela
 	if (is_ram) {
 		trans.set_dmi_allowed(true);
 	}
+	trans.set_response_status(tlm::TLM_OK_RESPONSE);
 }
 
 unsigned int tlmu_sc::to_tlmu_transport_dbg(tlm::tlm_generic_payload& trans)
