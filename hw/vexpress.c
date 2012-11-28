@@ -26,6 +26,10 @@
 #include "sysemu.h"
 #include "boards.h"
 
+#include "tlm.h"
+#include "tlm_mem.h"
+
+
 #define SMP_BOOT_ADDR 0xe0000000
 
 #define VEXPRESS_BOARD_ID 0x8e0
@@ -34,10 +38,10 @@ static struct arm_boot_info vexpress_binfo = {
     .smp_loader_start = SMP_BOOT_ADDR,
 };
 
-static void vexpress_a9_init(ram_addr_t ram_size,
+static void vexpress_a9_init_common(ram_addr_t ram_size,
                      const char *boot_device,
                      const char *kernel_filename, const char *kernel_cmdline,
-                     const char *initrd_filename, const char *cpu_model)
+                     const char *initrd_filename, const char *cpu_model, int tlm)
 {
     CPUState *env = NULL;
     ram_addr_t ram_offset, vram_offset, sram_offset;
@@ -197,6 +201,18 @@ static void vexpress_a9_init(ram_addr_t ram_size,
     cpu_register_physical_memory(SMP_BOOT_ADDR, 0x1000,
                                  ram_offset | IO_MEM_RAM);
 
+
+    if (tlm) {
+        /* TLM mappings.
+           The Vexpress motherboard maps things up to 15000000. It leaves
+           15000000 - 20000000 free. We assign that area to TLM.
+           Interrupts 18 - 31 are reserved according to the manuals, so
+           we use those for TLM.  */
+        tlm_map(env, 0x15000000ULL, 0x05000000ULL, tlm_sync_period_ns,
+                &pic[18], 8, NULL);
+        tlm_register_rams();
+    }
+
     vexpress_binfo.ram_size = ram_size;
     vexpress_binfo.kernel_filename = kernel_filename;
     vexpress_binfo.kernel_cmdline = kernel_cmdline;
@@ -207,6 +223,23 @@ static void vexpress_a9_init(ram_addr_t ram_size,
     arm_load_kernel(first_cpu, &vexpress_binfo);
 }
 
+static void vexpress_a9_init(ram_addr_t ram_size,
+                     const char *boot_device,
+                     const char *kernel_filename, const char *kernel_cmdline,
+                     const char *initrd_filename, const char *cpu_model)
+{
+    vexpress_a9_init_common(ram_size, boot_device, kernel_filename,
+                            kernel_cmdline, initrd_filename, cpu_model, 0);
+}
+
+static void vexpress_a9_tlm_init(ram_addr_t ram_size,
+                     const char *boot_device,
+                     const char *kernel_filename, const char *kernel_cmdline,
+                     const char *initrd_filename, const char *cpu_model)
+{
+    vexpress_a9_init_common(ram_size, boot_device, kernel_filename,
+                            kernel_cmdline, initrd_filename, cpu_model, 1);
+}
 
 static QEMUMachine vexpress_a9_machine = {
     .name = "vexpress-a9",
@@ -216,9 +249,18 @@ static QEMUMachine vexpress_a9_machine = {
     .max_cpus = 4,
 };
 
+static QEMUMachine vexpress_a9_tlm_machine = {
+    .name = "vexpress-a9-tlm",
+    .desc = "ARM Versatile Express for Cortex-A9",
+    .init = vexpress_a9_tlm_init,
+    .use_scsi = 1,
+    .max_cpus = 4,
+};
+
 static void vexpress_machine_init(void)
 {
     qemu_register_machine(&vexpress_a9_machine);
+    qemu_register_machine(&vexpress_a9_tlm_machine);
 }
 
 machine_init(vexpress_machine_init);
