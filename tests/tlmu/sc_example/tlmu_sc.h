@@ -66,6 +66,7 @@ public:
 
 	void wake(void);
 	void sleep(void);
+	void reset(void);
 
 private:
 	tlm_utils::tlm_quantumkeeper m_qk;

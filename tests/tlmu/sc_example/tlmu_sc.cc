@@ -350,6 +350,12 @@ void tlmu_sc::sleep(void)
 	tlmu_notify_event(&q, TLMU_TLM_EVENT_SLEEP, NULL);
 }
 
+void tlmu_sc::reset(void)
+{
+	this->wait_started();
+	tlmu_notify_event(&q, TLMU_TLM_EVENT_RESET, NULL);
+}
+
 void tlmu_sc::append_arg(const char *newarg)
 {
 	sc_assert(!is_running);
