@@ -2268,7 +2268,7 @@ void *qemu_map_paddr_to_host(target_phys_addr_t *paddr_p, int64_t *len)
         /* FIXME: Simplify!!!  */
         host = qemu_get_ram_ptr(pd & TARGET_PAGE_MASK);
         host += paddr & ~TARGET_PAGE_MASK;
-        host_base = qemu_ram_ptr_length(pd & TARGET_PAGE_MASK, &blen);
+        host_base = qemu_ram_ptr_size(pd & TARGET_PAGE_MASK, &blen);
         if (!host_base) {
             return NULL;
         }
@@ -3301,6 +3301,28 @@ void *qemu_ram_ptr_length(ram_addr_t addr, ram_addr_t *size)
                 if (addr - block->offset + *size > block->length)
                     *size = block->length - addr + block->offset;
                 return block->host + (addr - block->offset);
+            }
+        }
+
+        fprintf(stderr, "Bad ram offset %" PRIx64 "\n", (uint64_t)addr);
+        abort();
+    }
+}
+
+void *qemu_ram_ptr_size(ram_addr_t addr, ram_addr_t *size)
+{
+    if (*size == 0) {
+        return NULL;
+    }
+    if (xen_enabled()) {
+        return xen_map_cache(addr, *size, 1);
+    } else {
+        RAMBlock *block;
+
+        QLIST_FOREACH(block, &ram_list.blocks, next) {
+            if (addr - block->offset < block->length) {
+                *size = block->length;
+                return block->host;
             }
         }
 

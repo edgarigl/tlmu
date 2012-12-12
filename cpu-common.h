@@ -86,6 +86,7 @@ void *qemu_get_ram_base_ptr(ram_addr_t addr);
 void *qemu_map_paddr_to_host(target_phys_addr_t *paddr_p, int64_t *len);
 TLM_RAMBlock *qemu_get_ram_tlmblock(ram_addr_t addr);
 void *qemu_ram_ptr_length(ram_addr_t addr, ram_addr_t *size);
+void *qemu_ram_ptr_size(ram_addr_t addr, ram_addr_t *size);
 /* Same but slower, to use for migration, where the order of
  * RAMBlocks must not change. */
 void *qemu_safe_ram_ptr(ram_addr_t addr);
