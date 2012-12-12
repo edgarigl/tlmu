@@ -4506,6 +4506,13 @@ static inline uint64_t ldq_phys_internal(target_phys_addr_t addr,
         /* RAM case */
         ptr = qemu_get_ram_ptr(pd & TARGET_PAGE_MASK) +
             (addr & ~TARGET_PAGE_MASK);
+        unsigned long addr1;
+        addr1 = (pd & TARGET_PAGE_MASK) + (addr & ~TARGET_PAGE_MASK);
+        TLM_RAMBlock *tl = qemu_get_ram_tlmblock(addr1);
+        if (tl) {
+            tl->bus_access(tl->opaque, -1, 0,
+                                     addr, (void *) &val, 1);
+        } else {
         switch (endian) {
         case DEVICE_LITTLE_ENDIAN:
             val = ldq_le_p(ptr);
@@ -4516,6 +4523,7 @@ static inline uint64_t ldq_phys_internal(target_phys_addr_t addr,
         default:
             val = ldq_p(ptr);
             break;
+        }
         }
     }
     return val;
@@ -4581,6 +4589,13 @@ static inline uint32_t lduw_phys_internal(target_phys_addr_t addr,
         /* RAM case */
         ptr = qemu_get_ram_ptr(pd & TARGET_PAGE_MASK) +
             (addr & ~TARGET_PAGE_MASK);
+        unsigned long addr1;
+        addr1 = (pd & TARGET_PAGE_MASK) + (addr & ~TARGET_PAGE_MASK);
+        TLM_RAMBlock *tl = qemu_get_ram_tlmblock(addr1);
+        if (tl) {
+            tl->bus_access(tl->opaque, -1, 0,
+                                     addr, (void *) &val, 2);
+        } else {
         switch (endian) {
         case DEVICE_LITTLE_ENDIAN:
             val = lduw_le_p(ptr);
@@ -4591,6 +4606,7 @@ static inline uint32_t lduw_phys_internal(target_phys_addr_t addr,
         default:
             val = lduw_p(ptr);
             break;
+        }
         }
     }
     return val;
@@ -4636,7 +4652,13 @@ void stl_phys_notdirty(target_phys_addr_t addr, uint32_t val)
     } else {
         unsigned long addr1 = (pd & TARGET_PAGE_MASK) + (addr & ~TARGET_PAGE_MASK);
         ptr = qemu_get_ram_ptr(addr1);
+        TLM_RAMBlock *tl = qemu_get_ram_tlmblock(addr1);
+        if (tl) {
+            tl->bus_access(tl->opaque, -1, 1,
+                                     addr, (void *) &val, 4);
+        } else {
         stl_p(ptr, val);
+        }
 
         if (unlikely(in_migration)) {
             if (!cpu_physical_memory_is_dirty(addr1)) {
@@ -4678,7 +4700,15 @@ void stq_phys_notdirty(target_phys_addr_t addr, uint64_t val)
     } else {
         ptr = qemu_get_ram_ptr(pd & TARGET_PAGE_MASK) +
             (addr & ~TARGET_PAGE_MASK);
+        unsigned long addr1;
+        addr1 = (pd & TARGET_PAGE_MASK) + (addr & ~TARGET_PAGE_MASK);
+        TLM_RAMBlock *tl = qemu_get_ram_tlmblock(addr1);
+        if (tl) {
+            tl->bus_access(tl->opaque, -1, 1,
+                                     addr, (void *) &val, 1);
+        } else {
         stq_p(ptr, val);
+        }
     }
 }
 
@@ -4717,6 +4747,11 @@ static inline void stl_phys_internal(target_phys_addr_t addr, uint32_t val,
         addr1 = (pd & TARGET_PAGE_MASK) + (addr & ~TARGET_PAGE_MASK);
         /* RAM case */
         ptr = qemu_get_ram_ptr(addr1);
+        TLM_RAMBlock *tl = qemu_get_ram_tlmblock(addr1);
+        if (tl) {
+            tl->bus_access(tl->opaque, -1, 1,
+                                     addr, (void *) &val, 4);
+        } else {
         switch (endian) {
         case DEVICE_LITTLE_ENDIAN:
             stl_le_p(ptr, val);
@@ -4727,6 +4762,7 @@ static inline void stl_phys_internal(target_phys_addr_t addr, uint32_t val,
         default:
             stl_p(ptr, val);
             break;
+        }
         }
         if (!cpu_physical_memory_is_dirty(addr1)) {
             /* invalidate code */
@@ -4795,6 +4831,11 @@ static inline void stw_phys_internal(target_phys_addr_t addr, uint32_t val,
         addr1 = (pd & TARGET_PAGE_MASK) + (addr & ~TARGET_PAGE_MASK);
         /* RAM case */
         ptr = qemu_get_ram_ptr(addr1);
+        TLM_RAMBlock *tl = qemu_get_ram_tlmblock(addr1);
+        if (tl) {
+            tl->bus_access(tl->opaque, -1, 1,
+                                     addr, (void *) &val, 2);
+        } else {
         switch (endian) {
         case DEVICE_LITTLE_ENDIAN:
             stw_le_p(ptr, val);
@@ -4805,6 +4846,7 @@ static inline void stw_phys_internal(target_phys_addr_t addr, uint32_t val,
         default:
             stw_p(ptr, val);
             break;
+        }
         }
         if (!cpu_physical_memory_is_dirty(addr1)) {
             /* invalidate code */
