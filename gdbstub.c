@@ -288,6 +288,7 @@ typedef struct GDBState {
     uint8_t last_packet[MAX_PACKET_LENGTH + 4];
     int last_packet_len;
     int signal;
+    int client_connected;
 #ifdef CONFIG_USER_ONLY
     int fd;
     int running_state;
@@ -2262,8 +2263,16 @@ static int gdb_handle_packet(GDBState *s, const char *line_buf)
 
 void gdb_set_stop_cpu(CPUState *env)
 {
+    if (!gdbserver_state) {
+        return;
+    }
     gdbserver_state->c_cpu = env;
     gdbserver_state->g_cpu = env;
+}
+
+int gdbserver_has_client(void)
+{
+    return gdbserver_state && gdbserver_state->client_connected;
 }
 
 #ifndef CONFIG_USER_ONLY
@@ -2559,6 +2568,7 @@ gdb_handlesig (CPUState *env, int sig)
         {
           /* XXX: Connection closed.  Should probably wait for annother
              connection before continuing.  */
+          s->client_connected = 0;
           return sig;
         }
   }
@@ -2613,6 +2623,7 @@ static void gdb_accept(void)
     gdb_has_xml = 0;
 
     gdbserver_state = s;
+    s->client_connected = 1;
 
     fcntl(fd, F_SETFL, O_NONBLOCK);
 }
@@ -2695,6 +2706,11 @@ static void gdb_chr_event(void *opaque, int event)
     case CHR_EVENT_OPENED:
         vm_stop(VMSTOP_USER);
         gdb_has_xml = 0;
+        gdbserver_state->client_connected = 1;
+        break;
+    case CHR_EVENT_CLOSED:
+        g_free(gdbserver_state);
+        gdbserver_state->client_connected = 0;
         break;
     default:
         break;
