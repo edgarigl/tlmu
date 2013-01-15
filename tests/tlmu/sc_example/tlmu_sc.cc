@@ -201,6 +201,10 @@ int tlmu_sc::bus_access(int64_t clk, int rw,
 	delay = m_qk.get_local_time();
 	from_tlmu_sk->b_transport(tr, delay);
 
+	if (tr.get_response_status() != tlm::TLM_OK_RESPONSE) {
+		tlmu_notify_event(&q, TLMU_TLM_EVENT_DEBUG_BREAK, 0);
+	}
+
 	m_qk.set_and_sync(delay);
 	return tr.is_dmi_allowed();
 }
