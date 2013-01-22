@@ -41,7 +41,8 @@ static struct arm_boot_info vexpress_binfo = {
 static void vexpress_a9_init_common(ram_addr_t ram_size,
                      const char *boot_device,
                      const char *kernel_filename, const char *kernel_cmdline,
-                     const char *initrd_filename, const char *cpu_model, int tlm)
+                     const char *initrd_filename, const char *cpu_model,
+                     int tlm, uint32_t tlm_base, uint32_t tlm_len)
 {
     CPUState *env = NULL;
     ram_addr_t ram_offset, vram_offset, sram_offset;
@@ -204,11 +205,9 @@ static void vexpress_a9_init_common(ram_addr_t ram_size,
 
     if (tlm) {
         /* TLM mappings.
-           The Vexpress motherboard maps things up to 15000000. It leaves
-           15000000 - 20000000 free. We assign that area to TLM.
            Interrupts 18 - 31 are reserved according to the manuals, so
            we use those for TLM.  */
-        tlm_map(env, 0x15000000ULL, 0x05000000ULL, tlm_sync_period_ns,
+        tlm_map(env, tlm_base, tlm_len, tlm_sync_period_ns,
                 &pic[18], 8, NULL);
         tlm_register_rams();
     }
@@ -229,7 +228,8 @@ static void vexpress_a9_init(ram_addr_t ram_size,
                      const char *initrd_filename, const char *cpu_model)
 {
     vexpress_a9_init_common(ram_size, boot_device, kernel_filename,
-                            kernel_cmdline, initrd_filename, cpu_model, 0);
+                            kernel_cmdline, initrd_filename, cpu_model,
+                            0, 0, 0);
 }
 
 static void vexpress_a9_tlm_init(ram_addr_t ram_size,
@@ -237,8 +237,11 @@ static void vexpress_a9_tlm_init(ram_addr_t ram_size,
                      const char *kernel_filename, const char *kernel_cmdline,
                      const char *initrd_filename, const char *cpu_model)
 {
+    /* The Vexpress motherboard maps things up to 15000000. It leaves
+       15000000 - 20000000 free. We assign that area to TLM.  */
     vexpress_a9_init_common(ram_size, boot_device, kernel_filename,
-                            kernel_cmdline, initrd_filename, cpu_model, 1);
+                            kernel_cmdline, initrd_filename, cpu_model,
+                            1, 0x15000000, 0x04FFFFFF);
 }
 
 static QEMUMachine vexpress_a9_machine = {
