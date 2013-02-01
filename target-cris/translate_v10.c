@@ -97,6 +97,8 @@ static void gen_store_v10(DisasContext *dc, TCGv addr, TCGv val,
                        unsigned int size)
 {
     int mem_index = cpu_mmu_index(dc->env);
+    /* Due to icount, we need to update the CC flags on load/stores.  */
+    cris_evaluate_flags(dc);
 
     /* If we get a fault on a delayslot we must keep the jmp state in
        the cpu-state to be able to re-execute the jmp.  */
