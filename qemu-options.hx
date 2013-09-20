@@ -273,6 +273,16 @@ It is also used to set device models sync-quantum properties controlling
 the maximum amount of ahead of time simulation that is prefered (only a hint).
 ETEXI
 
+DEF("machine-path", HAS_ARG, QEMU_OPTION_machine_path,
+    "-machine-path DIR A directory in which to create machine nodes\n", QEMU_ARCH_ALL)
+STEXI
+@item -machine-path @var{path}
+@findex -machine-path
+Selects the machine path.
+Multi-arch machine nodes will be created in @var{path}.
+This option sets -mem-shared-path to the given @var{path}
+ETEXI
+
 DEF("k", HAS_ARG, QEMU_OPTION_k,
     "-k language     use keyboard layout (for example 'fr' for French)\n",
     QEMU_ARCH_ALL)

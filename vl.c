@@ -134,6 +134,7 @@ const char* keyboard_layout = NULL;
 ram_addr_t ram_size;
 const char *mem_path = NULL;
 uint64_t global_sync_quantum = 0;
+const char *machine_path = NULL;
 int mem_prealloc = 0; /* force preallocation of physical target memory */
 bool enable_mlock = false;
 int nb_nics;
@@ -3214,6 +3215,9 @@ int main(int argc, char **argv, char **envp)
                 break;
             case QEMU_OPTION_sync_quantum:
                 global_sync_quantum = strtoull(optarg, (char **) &optarg, 10);
+                break;
+            case QEMU_OPTION_machine_path:
+                machine_path = optarg;
                 break;
             case QEMU_OPTION_d:
                 log_mask = optarg;
