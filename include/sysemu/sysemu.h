@@ -138,6 +138,8 @@ extern QEMUClockType rtc_clock;
 extern const char *mem_path;
 extern int mem_prealloc;
 
+extern uint64_t global_sync_quantum;
+
 #define MAX_NODES 128
 
 /* The following shall be true for all CPUs:

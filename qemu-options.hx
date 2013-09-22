@@ -262,6 +262,17 @@ STEXI
 Preallocate memory when using -mem-path.
 ETEXI
 
+DEF("sync-quantum", HAS_ARG, QEMU_OPTION_sync_quantum,
+    "-sync-quantum Max time between synchroniation, nanoseconds.\n", QEMU_ARCH_ALL)
+STEXI
+@item -sync-quantum @var{val}
+@findex -sync-quantum
+Maximum time between synchronization @var{val}.
+This value is used to drive periodic synchronization with remote port peers.
+It is also used to set device models sync-quantum properties controlling
+the maximum amount of ahead of time simulation that is prefered (only a hint).
+ETEXI
+
 DEF("k", HAS_ARG, QEMU_OPTION_k,
     "-k language     use keyboard layout (for example 'fr' for French)\n",
     QEMU_ARCH_ALL)

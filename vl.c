@@ -133,6 +133,7 @@ static int display_remote;
 const char* keyboard_layout = NULL;
 ram_addr_t ram_size;
 const char *mem_path = NULL;
+uint64_t global_sync_quantum = 0;
 int mem_prealloc = 0; /* force preallocation of physical target memory */
 bool enable_mlock = false;
 int nb_nics;
@@ -3210,6 +3211,9 @@ int main(int argc, char **argv, char **envp)
                 break;
             case QEMU_OPTION_mem_prealloc:
                 mem_prealloc = 1;
+                break;
+            case QEMU_OPTION_sync_quantum:
+                global_sync_quantum = strtoull(optarg, (char **) &optarg, 10);
                 break;
             case QEMU_OPTION_d:
                 log_mask = optarg;
