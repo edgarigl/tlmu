@@ -334,12 +334,22 @@ static int64_t qemu_icount_round(int64_t count)
     return (count + (1 << icount_time_shift) - 1) >> icount_time_shift;
 }
 
+static bool icount_idle_timewarps = true;
+void qemu_icount_enable_idle_timewarps(bool enable)
+{
+    icount_idle_timewarps = enable;
+}
+
 static void icount_warp_rt(void *opaque)
 {
     /* The icount_warp_timer is rescheduled soon after vm_clock_warp_start
      * changes from -1 to another value, so the race here is okay.
      */
     if (atomic_read(&vm_clock_warp_start) == -1) {
+        return;
+    }
+
+    if (icount_idle_timewarps) {
         return;
     }
 
@@ -421,6 +431,10 @@ void qemu_clock_warp(QEMUClockType type)
      * need for if statements all over the place.
      */
     if (type != QEMU_CLOCK_VIRTUAL || !use_icount) {
+        return;
+    }
+
+    if (!icount_idle_timewarps) {
         return;
     }
 

@@ -17,6 +17,8 @@ void tcg_clock_warp(int64_t dest);
 bool tcg_idle_clock_warp(int64_t dest);
 void qtest_clock_warp(int64_t dest);
 
+void qemu_icount_enable_idle_timewarps(bool enable);
+
 #ifndef CONFIG_USER_ONLY
 /* vl.c */
 extern int smp_cores;
