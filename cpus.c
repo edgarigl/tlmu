@@ -369,6 +369,30 @@ static void icount_warp_rt(void *opaque)
     }
 }
 
+void tcg_clock_warp(int64_t dest)
+{
+    int64_t clock = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+
+    if (clock < dest) {
+        int64_t deadline = qemu_clock_deadline_ns_all(QEMU_CLOCK_VIRTUAL);
+        int64_t warp = MIN(dest - clock, deadline);
+        timers_state.qemu_icount_bias += warp;
+        qemu_clock_run_timers(QEMU_CLOCK_VIRTUAL);
+        clock = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    }
+    qemu_notify_event();
+}
+
+bool tcg_idle_clock_warp(int64_t dest)
+{
+    if (!all_cpu_threads_idle()) {
+        return false;
+    }
+
+    tcg_clock_warp(dest);
+    return true;
+}
+
 void qtest_clock_warp(int64_t dest)
 {
     int64_t clock = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);

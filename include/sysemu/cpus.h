@@ -12,6 +12,8 @@ void cpu_synchronize_all_post_reset(void);
 void cpu_synchronize_all_post_init(void);
 void cpu_clean_all_dirty(void);
 
+void tcg_clock_warp(int64_t dest);
+bool tcg_idle_clock_warp(int64_t dest);
 void qtest_clock_warp(int64_t dest);
 
 #ifndef CONFIG_USER_ONLY
