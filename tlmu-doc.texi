@@ -259,7 +259,7 @@ etc
 Before performing any TLMu operations, you need to get hold of a TLMu instance.
 This can be done by simply creating one and initializing it with tlmu_init().
 
-@example{
+@example
 /*
  * Initialize a TLMu instance. Takes an instance name as argument.
  */
