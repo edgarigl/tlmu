@@ -173,6 +173,8 @@ struct VEDBoardInfo {
     uint32_t num_clocks;
     const uint32_t *clocks;
     DBoardInitFn *init;
+    bool remoteport;
+    uint64_t rp_base;
 };
 
 static void init_cpus(const char *cpu_model, const char *privdev,
@@ -322,6 +324,20 @@ static VEDBoardInfo a9_daughterboard = {
     .init = a9_daughterboard_init,
 };
 
+static VEDBoardInfo a9_rp_daughterboard = {
+    .motherboard_map = motherboard_legacy_map,
+    .loader_start = 0x60000000,
+    .gic_cpu_if_addr = 0x1e000100,
+    .proc_id = 0x0c000191,
+    .num_voltage_sensors = ARRAY_SIZE(a9_voltages),
+    .voltages = a9_voltages,
+    .num_clocks = ARRAY_SIZE(a9_clocks),
+    .clocks = a9_clocks,
+    .init = a9_daughterboard_init,
+    .remoteport = true,
+    .rp_base = 0x16000000,
+};
+
 static void a15_daughterboard_init(const VEDBoardInfo *daughterboard,
                                    ram_addr_t ram_size,
                                    const char *cpu_model,
@@ -389,6 +405,20 @@ static const uint32_t a15_clocks[] = {
     50000000, /* OSCCLK6: 50MHz : static memory controller clock */
     60000000, /* OSCCLK7: 60MHz : SYSCLK reference */
     40000000, /* OSCCLK8: 40MHz : DDR2 PLL reference */
+};
+
+static VEDBoardInfo a15_rp_daughterboard = {
+    .motherboard_map = motherboard_aseries_map,
+    .loader_start = 0x80000000,
+    .gic_cpu_if_addr = 0x2c002000,
+    .proc_id = 0x14000237,
+    .num_voltage_sensors = ARRAY_SIZE(a15_voltages),
+    .voltages = a15_voltages,
+    .num_clocks = ARRAY_SIZE(a15_clocks),
+    .clocks = a15_clocks,
+    .init = a15_daughterboard_init,
+    .remoteport = true,
+    .rp_base = 0x16000000,
 };
 
 static VEDBoardInfo a15_daughterboard = {
@@ -511,6 +541,54 @@ static pflash_t *ve_pflash_cfi01_register(hwaddr base, const char *name,
 
     sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, base);
     return OBJECT_CHECK(pflash_t, (dev), "cfi.pflash01");
+}
+
+static void rp_init(uint64_t base, qemu_irq *pic)
+{
+        DeviceState *rp, *rp_master, *rp_slave, *rp_gpio;
+
+        /* Create the Remote-port communication adaptor.  */
+        rp = qdev_create(NULL, "remote-port");
+        qdev_prop_set_uint64(rp, "sync-quantum", 10000);
+        qdev_init_nofail(rp);
+
+        /* Create the Remote-port memory master device.  */
+        rp_master = qdev_create(NULL, "remote-port-memory-master");
+        object_property_set_link(OBJECT(rp_master), OBJECT(rp), "rp-adaptor0",
+                                     &error_abort);
+        qdev_prop_set_uint64(rp_master, "rp-chan0", 1);
+
+        qdev_prop_set_uint32(rp_master, "len-mapsize", 1);
+        qdev_prop_set_uint64(rp_master, "mapsize[0]", 0x1000);
+        qdev_prop_set_uint32(rp_master, "len-mapoffset", 1);
+        qdev_prop_set_uint64(rp_master, "mapoffset[0]", base);
+
+        qdev_init_nofail(rp_master);
+        sysbus_mmio_map_overlap(SYS_BUS_DEVICE(rp_master), 0, base, 1);
+
+        /* Create the Remote-port memory slave device.  */
+        rp_slave = qdev_create(NULL, "remote-port-memory-slave");
+        object_property_set_link(OBJECT(rp_slave), OBJECT(rp), "rp-adaptor0",
+                                     &error_abort);
+        qdev_init_nofail(rp_slave);
+
+        /* Create the Remote-port GPIO/IRQ connection.  */
+        rp_gpio = qdev_create(NULL, "remote-port-gpio");
+        object_property_set_link(OBJECT(rp_gpio), OBJECT(rp), "rp-adaptor0",
+                                     &error_abort);
+        qdev_prop_set_uint64(rp_gpio, "rp-chan0", 2);
+        qdev_prop_set_uint16(rp_gpio, "num-gpios", 2);
+        qdev_init_nofail(rp_gpio);
+        sysbus_connect_irq(SYS_BUS_DEVICE(rp_gpio), 0, pic[18]);
+        sysbus_connect_irq(SYS_BUS_DEVICE(rp_gpio), 0, pic[19]);
+
+
+        object_property_set_link(OBJECT(rp), OBJECT(rp_slave),
+                                 "remote-port-dev0", &error_abort);
+        object_property_set_link(OBJECT(rp), OBJECT(rp_master),
+                                 "remote-port-dev1", &error_abort);
+        object_property_set_link(OBJECT(rp), OBJECT(rp_gpio),
+                                 "remote-port-dev2", &error_abort);
 }
 
 static void vexpress_common_init(VEDBoardInfo *daughterboard,
@@ -667,6 +745,10 @@ static void vexpress_common_init(VEDBoardInfo *daughterboard,
                              pic[40 + i]);
     }
 
+    if (daughterboard->remoteport) {
+        rp_init(daughterboard->rp_base, pic);
+    }
+
     daughterboard->bootinfo.ram_size = machine->ram_size;
     daughterboard->bootinfo.kernel_filename = machine->kernel_filename;
     daughterboard->bootinfo.kernel_cmdline = machine->kernel_cmdline;
@@ -681,9 +763,19 @@ static void vexpress_common_init(VEDBoardInfo *daughterboard,
     arm_load_kernel(ARM_CPU(first_cpu), &daughterboard->bootinfo);
 }
 
+static void vexpress_a9_rp_init(MachineState *machine)
+{
+    vexpress_common_init(&a9_rp_daughterboard, machine);
+}
+
 static void vexpress_a9_init(MachineState *machine)
 {
     vexpress_common_init(&a9_daughterboard, machine);
+}
+
+static void vexpress_a15_rp_init(MachineState *machine)
+{
+    vexpress_common_init(&a15_rp_daughterboard, machine);
 }
 
 static void vexpress_a15_init(MachineState *machine)
@@ -691,10 +783,26 @@ static void vexpress_a15_init(MachineState *machine)
     vexpress_common_init(&a15_daughterboard, machine);
 }
 
+static QEMUMachine vexpress_a9_rp_machine = {
+    .name = "vexpress-a9-rp",
+    .desc = "ARM Versatile Express for Cortex-A9",
+    .init = vexpress_a9_rp_init,
+    .block_default_type = IF_SCSI,
+    .max_cpus = 4,
+};
+
 static QEMUMachine vexpress_a9_machine = {
     .name = "vexpress-a9",
     .desc = "ARM Versatile Express for Cortex-A9",
     .init = vexpress_a9_init,
+    .block_default_type = IF_SCSI,
+    .max_cpus = 4,
+};
+
+static QEMUMachine vexpress_a15_rp_machine = {
+    .name = "vexpress-a15-rp",
+    .desc = "ARM Versatile Express for Cortex-A15",
+    .init = vexpress_a15_rp_init,
     .block_default_type = IF_SCSI,
     .max_cpus = 4,
 };
@@ -710,7 +818,9 @@ static QEMUMachine vexpress_a15_machine = {
 static void vexpress_machine_init(void)
 {
     qemu_register_machine(&vexpress_a9_machine);
+    qemu_register_machine(&vexpress_a9_rp_machine);
     qemu_register_machine(&vexpress_a15_machine);
+    qemu_register_machine(&vexpress_a15_rp_machine);
 }
 
 machine_init(vexpress_machine_init);
