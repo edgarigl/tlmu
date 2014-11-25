@@ -456,9 +456,18 @@ static CharDriverState *rp_autocreate_chardev(RemotePort *s, char *name)
     free(chardesc);
 
     if (!chr) {
+        char *name2;
+        int r;
+
+        r = asprintf(&name2, "%s-server", name);
+        if (r <= 0) {
+            return NULL;
+        }
+
         chardesc = rp_autocreate_chardesc(s, true);
-        chr = qemu_chr_new(name, chardesc, NULL);
+        chr = qemu_chr_new(name2, chardesc, NULL);
         free(chardesc);
+        free(name2);
     }
     return chr;
 }
