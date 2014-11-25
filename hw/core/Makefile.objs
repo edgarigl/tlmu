@@ -15,3 +15,9 @@ common-obj-$(CONFIG_SOFTMMU) += null-machine.o
 common-obj-$(CONFIG_SOFTMMU) += loader.o
 common-obj-$(CONFIG_SOFTMMU) += qdev-properties-system.o
 common-obj-$(CONFIG_SOFTMMU) += platform-bus.o
+
+obj-$(CONFIG_SOFTMMU) += remote-port-proto.o
+obj-$(CONFIG_SOFTMMU) += remote-port.o
+obj-$(CONFIG_SOFTMMU) += remote-port-memory-master.o
+obj-$(CONFIG_SOFTMMU) += remote-port-memory-slave.o
+obj-$(CONFIG_SOFTMMU) += remote-port-gpio.o
