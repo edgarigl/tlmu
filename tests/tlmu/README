@@ -1,0 +1,51 @@
+TLM-COSIM-DEMO
+--------------
+This contains a small TLM based subsystem for demo purposes.
+It has an interconnect connecting a remote-port attached QEMU
+instance, a debug-device and a small DMA.
+
+The debug-device is used to read out System-C time, output
+debug trace/events and to end the simulation.
+
+The DMA is used to test the bus mastering capabilities of the
+TLM world back into QEMU via remote-port.
+
+BUILD and RUN
+-------------
+To build the TLM system you need to have SystemC and TLM-2.0 installed.
+You will need to edit the top of f the Makefile and change the SYSTEMC
+and TLM paths.
+
+By default, they point to an installation at /home/edgari/local/opt/systemc.
+
+Once you've edited the Makefile, running make should build you the sc_demo
+application.
+
+To run things:
+1. Create a machine directory
+$ mkdir /tmp/test-machine
+
+Run qemu:
+$ qemu-system-aarch64 -M vexpress-a9-rp -display none -serial mon:stdio -machine-path /tmp/ -s -S
+
+You should see something like the following:
+qemu-system-aarch64: Failed to connect socket: Connection refused
+QEMU waiting for connection on: disconnected:unix:/tmp//qemu-rport-_machine_unattached_device[30],server
+
+The first connection fails, because the system-c side is not yet running. So QEMU will auto fallback to creating a listening remote-port socket.
+
+Run TLM system:
+$ LD_LIBRARY_PATH=~/local/opt/systemc/lib-linux64 ./sc_demo unix:///tmp//qemu-rport-_machine_unattached_device[30]  10000
+
+Now everything is hooked up. Try the TLM interaction with gdb:
+
+$ gdb-multiarch
+(gdb) target remote :1234
+Remote debugging using :1234
+warning: Architecture rejected target-supplied description
+0x00000000 in ?? ()
+(gdb) set {int}0x16000000 = 0x100
+(gdb) set {int}0x16000000 = 0x100
+(gdb) set {int}0x16000008 = 0x100
+Remote connection closed
+(gdb) 
